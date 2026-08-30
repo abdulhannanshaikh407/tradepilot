@@ -1,11 +1,13 @@
 # Render Blueprint — TradePilot AI backend (always-on FastAPI + auto-trade loop)
-# Deploy: create a GitHub repo from this project, then in Render →
-# "New" → "Blueprint" → connect the repo and press "Apply".
+# Render Blueprints require this file at the REPO ROOT. The service itself runs
+# in backend/ (see rootDirectory). Deploy: render.com → New → Blueprint →
+# pick the repo → Apply.
 # Docs: https://docs.render.com/blueprint-spec
 services:
   - type: web
     name: tradepilot-api
     runtime: python
+    rootDirectory: backend
     buildCommand: ""
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
