@@ -53,6 +53,83 @@ for Play Store / App Store.
 
 ---
 
+# Session — 2026-08-31: Deployment to production (Render + Vercel)
+
+## Objective
+Deploy the full stack to production: backend (FastAPI + auto-trade engine) on Render,
+frontend (Next.js) on Vercel, paper-only with real Binance market data.
+
+## Deployment results (live)
+| Service | URL |
+|---|---|
+| Backend (FastAPI) | https://tradepilot-xfk2.onrender.com |
+| Frontend (Next.js) | https://frontend-l6we17khh-abdulhannanshaikh407s-projects.vercel.app |
+| API docs | https://tradepilot-xfk2.onrender.com/docs |
+| GitHub repo | https://github.com/abdulhannanshaikh407/tradepilot |
+
+## What was done
+1. **GitHub repo created and pushed** (126 files, zero secrets tracked):
+   - `git init` + `git branch -M main` + `gh repo create tradepilot --public`
+   - Fixed GH007 (email privacy) by using GitHub noreply email for commit author
+   - All .env, venv, node_modules, *.db excluded via .gitignore
+
+2. **Render backend (Web Service, not Blueprint):**
+   - Render Blueprints do NOT support `rootDirectory` in `render.yaml` (field not in spec)
+   - Used **New → Web Service** with Root Directory = `backend`
+   - Build: `pip install -r requirements.txt`; Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - First deploy failed (exit 1): `_assert_production_secrets()` in `main.py:46` rejected
+     default `JWT_SECRET` / `TRADINGVIEW_WEBHOOK_SECRET` — fixed by setting strong values
+     in Render Environment tab
+   - Second deploy succeeded: backend live at `https://tradepilot-xfk2.onrender.com`
+
+3. **Vercel frontend:**
+   - `npm i -g vercel` + `vercel login` (device flow: BNLZ-VRTJ)
+   - `vercel link --yes` (project: abdulhannanshaikh407s-projects/frontend)
+   - `vercel --yes --prod` from `frontend/` directory
+   - Set `NEXT_PUBLIC_API_URL=https://tradepilot-xfk2.onrender.com` as Vercel env var
+   - Redeployed with production API URL baked in
+
+4. **CORS wired:**
+   - Updated `CORS_ORIGINS` on Render to include the Vercel domain
+   - Final deploy cleared cache and redeployed
+
+5. **Verified:** frontend loads, demo login works, dashboard shows Binance-backed crypto
+   prices, auto-trade engine running (paper mode, no real keys).
+
+## Files created/modified for deployment
+- `backend/render.yaml` (removed — Blueprint spec doesn't support rootDirectory)
+- `backend/Procfile` (kept — Railway compatible)
+- `frontend/vercel.json` (force nextjs framework detection)
+- `DEPLOY.md` (full runbook for Vercel + Render)
+- `RENDER_DEPLOY_LOG.md` (deploy log + fix for exit 1)
+- `.gitignore` (verified clean: no secrets, no venv, no node_modules)
+
+## Gotchas encountered and fixed
+- **Render Blueprint `rootDirectory` not supported**: Blueprint spec does not have this
+  field. Must use Web Service + manual Root Directory picker instead.
+- **GH007 email privacy**: git push rejected because commit email was private. Fixed by
+  amending commit with GitHub noreply email (`ID+username@users.noreply.github.com`).
+- **Production secrets check**: `ENVIRONMENT=production` triggers `_assert_production_secrets()`
+  which requires JWT_SECRET ≥ 32 chars and TRADINGVIEW_WEBHOOK_SECRET ≥ 16 chars, neither
+  can be a default value. Set via Render Environment tab.
+
+## Environment variables on Render (production)
+| Variable | Value |
+|---|---|
+| ENVIRONMENT | production |
+| PYTHON_VERSION | 3.12 |
+| JWT_SECRET | (generated — strong random) |
+| TRADINGVIEW_WEBHOOK_SECRET | (generated — strong random) |
+| MARKET_DATA_PROVIDER | binance |
+| AUTOTRADE_ENABLED | true |
+| AUTOTRADE_INTERVAL | 120 |
+| AUTOTRADE_PAPER_CAPITAL | 10000 |
+| BINANCE_API_KEY | (empty — paper only) |
+| BINANCE_API_SECRET | (empty — paper only) |
+| CORS_ORIGINS | https://frontend-l6we17khh-abdulhannanshaikh407s-projects.vercel.app |
+
+---
+
 # Session — 2026-08-30 (prior): Market data + optimizer + TradingView live
 
 ---
