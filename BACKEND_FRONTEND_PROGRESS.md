@@ -3,6 +3,10 @@
 ## Objective (latest)
 1. **Auto-trade**: analyse market data -> generate alerts -> **trade** (Binance crypto), paper-first with a manual arming switch. Done + tested in `backend/`.
 2. **Mobile app** for Play Store / App Store (`mobile/`, Expo 53 + React Native, strict TS) — built, typechecked, build/submit via EAS.
+3. **Deployment**: backend on Render, frontend on Vercel, **LIVE** at:
+   - Backend: https://tradepilot-xfk2.onrender.com
+   - Frontend: https://frontend-l6we17khh-abdulhannanshaikh407s-projects.vercel.app
+   - GitHub: https://github.com/abdulhannanshaikh407/tradepilot
 
 ## Backend: auto-trade engine (done, verified via pytest — **73 tests green**)
 - **`app/db/models.py`**: `AutoTradeConfig` (enabled, mode paper/live, capital, risk_percent, slippage_percent, max_concurrent, max_daily_loss, cooldown_minutes, last_run_at, last_error) + `Position` (symbol, direction, broker, status, entry/current/stop/take, size, cost, pnl, exit_reason, opened_at, closed_at) + User relationships.
