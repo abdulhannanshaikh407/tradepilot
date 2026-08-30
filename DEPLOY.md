@@ -37,12 +37,28 @@ so the 24/7 auto-trade `monitor_loop` and broker engine cannot run there.
 ## 1. Backend → Render (recommended)
 
 1. Sign up at https://render.com (GitHub login, free plan).
-2. **New → Blueprint** → connect the `tradepilot` repo → Apply.
-   `render.yaml` (at the repo root, with `rootDirectory: backend`) already defines the
-   service: Python 3.12, `uvicorn … --port $PORT`, and env vars (`JWT_SECRET`,
-   `TRADINGVIEW_WEBHOOK_SECRET` auto-generated; the rest preset).
-   > Render Blueprints only read `render.yaml` from the repo root — do not move it into
-   > `backend/` (that produces "Blueprint file render.yaml not found on main branch").
+2. **New+ → Web Service** (not Blueprint — Render Blueprints don't support
+   `rootDirectory` in `render.yaml`).
+3. Connect GitHub → select the **tradepilot** repo.
+4. Fill in:
+   - **Name:** `tradepilot-api`
+   - **Root Directory:** `backend` ← critical, sets the working directory
+   - **Runtime:** Python 3
+   - **Build Command:** `pip install -r requirements.txt` (auto-filled)
+   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+5. Under **Environment** add:
+   - `PYTHON_VERSION` = `3.12`
+   - `ENVIRONMENT` = `production`
+   - `JWT_SECRET` = (click Generate)
+   - `TRADINGVIEW_WEBHOOK_SECRET` = (click Generate)
+   - `MARKET_DATA_PROVIDER` = `binance`
+   - `AUTOTRADE_ENABLED` = `true`
+   - `AUTOTRADE_INTERVAL` = `120`
+   - `AUTOTRADE_PAPER_CAPITAL` = `10000`
+   - `BINANCE_API_KEY` = (leave empty)
+   - `BINANCE_API_SECRET` = (leave empty)
+   - `CORS_ORIGINS` = `http://localhost:3000,https://YOUR-FRONTEND.vercel.app`
+6. **Create Web Service** → wait for deploy → grab the URL (e.g. `https://tradepilot-api.onrender.com`).
 3. On first deploy, grab the URL: `https://tradepilot-api.onrender.com`. Verify:
    ```bash
    curl https://tradepilot-api.onrender.com/
