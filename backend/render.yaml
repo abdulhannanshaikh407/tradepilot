@@ -1,0 +1,47 @@
+# Render Blueprint — TradePilot AI backend (always-on FastAPI + auto-trade loop)
+# Deploy: create a GitHub repo from this project, then in Render →
+# "New" → "Blueprint" → connect the repo and press "Apply".
+# Docs: https://docs.render.com/blueprint-spec
+services:
+  - type: web
+    name: tradepilot-api
+    runtime: python
+    buildCommand: ""
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: ENVIRONMENT
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TRADINGVIEW_WEBHOOK_SECRET
+        generateValue: true
+      - key: MARKET_DATA_PROVIDER
+        value: binance
+      - key: AUTOTRADE_ENABLED
+        value: "true"
+      - key: AUTOTRADE_INTERVAL
+        value: "120"
+      - key: AUTOTRADE_PAPER_CAPITAL
+        value: "10000"
+      # Paper mode only for now — leave these empty. Setting them enables
+      # arming REAL Binance execution (per-strategy mode=live).
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
+      # Optional — paste your real values if you want them:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      # Replace with your Vercel frontend domain after deploying it.
+      - key: CORS_ORIGINS
+        value: http://localhost:3000,https://YOUR-FRONTEND.vercel.app
+      # Without a managed Postgres, sqlite:///./tradepilot.db lives on the
+      # instance and resets on redeploy. For persistence, add a Render Postgres
+      # and set: DATABASE_URL=postgresql+psycopg2://<user>:<pass>@<host>/<db>
