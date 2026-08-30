@@ -37,9 +37,12 @@ so the 24/7 auto-trade `monitor_loop` and broker engine cannot run there.
 ## 1. Backend → Render (recommended)
 
 1. Sign up at https://render.com (GitHub login, free plan).
-2. **New → Blueprint** → connect the `tradepilot` repo → Root Directory = `backend` → Apply.
-   `render.yaml` already defines the service: Python 3.12, `uvicorn … --port $PORT`,
-   and env vars (`JWT_SECRET`, `TRADINGVIEW_WEBHOOK_SECRET` auto-generated; the rest preset).
+2. **New → Blueprint** → connect the `tradepilot` repo → Apply.
+   `render.yaml` (at the repo root, with `rootDirectory: backend`) already defines the
+   service: Python 3.12, `uvicorn … --port $PORT`, and env vars (`JWT_SECRET`,
+   `TRADINGVIEW_WEBHOOK_SECRET` auto-generated; the rest preset).
+   > Render Blueprints only read `render.yaml` from the repo root — do not move it into
+   > `backend/` (that produces "Blueprint file render.yaml not found on main branch").
 3. On first deploy, grab the URL: `https://tradepilot-api.onrender.com`. Verify:
    ```bash
    curl https://tradepilot-api.onrender.com/
