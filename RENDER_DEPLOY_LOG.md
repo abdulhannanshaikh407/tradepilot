@@ -1,5 +1,14 @@
 # Render Deploy Log — August 31, 2026
 
+## Final URLs
+
+| Service | URL |
+|---|---|
+| Backend (FastAPI) | https://tradepilot-xfk2.onrender.com |
+| Frontend (Next.js) | https://frontend-l6we17khh-abdulhannanshaikh407s-projects.vercel.app |
+| API docs | https://tradepilot-xfk2.onrender.com/docs |
+| GitHub | https://github.com/abdulhannanshaikh407/tradepilot |
+
 ## Deploy Attempt — Failed (Exit Status 1)
 
 **Deploy ID:** dep-daa9bt142hec739t5a4g
