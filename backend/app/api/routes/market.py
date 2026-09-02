@@ -87,3 +87,55 @@ def live_quotes_endpoint(user=Depends(get_current_user)):
         "live_count": count_live,
         "quotes": quotes,
     }
+
+
+@router.get("/tick")
+def live_tick(
+    symbol: str = Query(default="XAUUSD"),
+    user=Depends(get_current_user),
+):
+    """Real-time tick from Biquote (free, no API key). Returns bid/ask/mid."""
+    from app.services.biquote_provider import biquote_provider
+    symbol = normalize_symbol(symbol)
+    tick = biquote_provider.get_tick(symbol)
+    if not tick:
+        raise HTTPException(status_code=503, detail="Biquote tick unavailable")
+    return tick
+
+
+@router.get("/ticks")
+def live_ticks_batch(
+    symbols: str = Query(default="XAUUSD,EUR/USD,GBP/USD"),
+    user=Depends(get_current_user),
+):
+    """Batch real-time ticks from Biquote for multiple symbols."""
+    from app.services.biquote_provider import biquote_provider
+    symbol_list = [normalize_symbol(s.strip()) for s in symbols.split(",")]
+    ticks = biquote_provider.get_ticks_batch(symbol_list)
+    return {"ticks": ticks}
+
+
+@router.get("/gold")
+def gold_price(user=Depends(get_current_user)):
+    """Live XAU/USD spot from XAUS (free, no API key)."""
+    from app.services.xaus_provider import xaus_provider
+    return xaus_provider.get_spot()
+
+
+@router.get("/providers")
+def available_providers(user=Depends(get_current_user)):
+    """List available market data providers and their status."""
+    import os
+    providers = {
+        "simulated": {"status": "active", "description": "Deterministic demo data"},
+        "binance": {"status": "configured" if os.getenv("MARKET_DATA_PROVIDER") == "binance" else "available", "description": "Binance public API (crypto)"},
+        "biquote": {"status": "configured" if os.getenv("MARKET_DATA_PROVIDER") == "biquote" else "available", "description": "Biquote free API (280+ forex/metals, no key)"},
+        "gold_forex": {"status": "configured" if os.getenv("MARKET_DATA_PROVIDER") == "gold_forex" else "available", "description": "Multi-source gold+forex (Biquote+XAUS+gold-api+MintedMetal, no key)"},
+        "finnhub": {"status": "configured" if os.getenv("FINNHUB_API_KEY") else "needs_api_key", "description": "Finnhub free API (US stocks, forex, crypto)"},
+        "oanda": {"status": "configured" if os.getenv("OANDA_API_KEY") else "needs_api_key", "description": "OANDA free demo (forex + metals, execution)"},
+        "mtsocket": {"status": "available", "description": "MTSocket free tier (XAUUSD + forex, WebSocket + REST)"},
+        "xaus": {"status": "available", "description": "XAUS free gold spot (no key)"},
+        "gold-api.com": {"status": "available", "description": "gold-api.com free (XAU/XAG/XPT/XPD, no rate limit)"},
+        "mintedmetal": {"status": "available", "description": "MintedMetal LBMA prices (free, CC BY 4.0)"},
+    }
+    return {"providers": providers, "active": os.getenv("MARKET_DATA_PROVIDER", "simulated")}

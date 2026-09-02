@@ -73,6 +73,8 @@ class User(Base):
     usage_records = relationship("UsageRecord", back_populates="user", cascade="all, delete-orphan")
     autotrade_configs = relationship("AutoTradeConfig", back_populates="user", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
+    device_tokens = relationship("DeviceToken", back_populates="user", cascade="all, delete-orphan")
+    broker_connections = relationship("BrokerConnection", back_populates="user", cascade="all, delete-orphan")
     subscription = relationship(
         "Subscription",
         back_populates="user",
@@ -274,8 +276,8 @@ class UsageRecord(Base):
 class AutoTradeConfig(Base):
     """Per-strategy auto-trading settings.
 
-    Trades are PAPER by default. `mode` flips to "live" only when real Binance
-    credentials are configured on the server AND the user explicitly arms it.
+    Trades are PAPER by default. `mode` flips to "live" only when the user
+    has a verified BrokerConnection and explicitly arms it.
     """
 
     __tablename__ = "autotrade_configs"
@@ -283,6 +285,7 @@ class AutoTradeConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False)
+    broker_connection_id = Column(Integer, ForeignKey("broker_connections.id"), nullable=True)
     enabled = Column(Boolean, nullable=False, default=False)
     mode = Column(String, nullable=False, default="paper")  # "paper" | "live"
     capital = Column(Float, nullable=False, default=10000.0)
@@ -298,6 +301,7 @@ class AutoTradeConfig(Base):
 
     user = relationship("User")
     strategy = relationship("Strategy")
+    broker_connection = relationship("BrokerConnection")
 
 
 class Position(Base):
@@ -330,3 +334,98 @@ class Position(Base):
     user = relationship("User")
     strategy = relationship("Strategy")
     signal = relationship("Signal")
+
+
+class AlertPreference(Base):
+    """Per-strategy alert preferences — users toggle alerts on/off."""
+
+    __tablename__ = "alert_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=False)
+    alerts_enabled = Column(Boolean, nullable=False, default=True)
+    push_enabled = Column(Boolean, nullable=False, default=True)
+    email_enabled = Column(Boolean, nullable=False, default=False)
+    in_app_enabled = Column(Boolean, nullable=False, default=True)
+    min_confidence = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User")
+    strategy = relationship("Strategy")
+
+
+class DeviceToken(Base):
+    """FCM device tokens for push notifications (mobile + web)."""
+
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    token = Column(String, nullable=False, unique=True, index=True)
+    platform = Column(String, nullable=False, default="android")  # android | ios | web
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("User", back_populates="device_tokens")
+
+
+class BrokerConnection(Base):
+    """User's broker API connection."""
+
+    __tablename__ = "broker_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    broker_name = Column(String, nullable=False)  # alpaca, binance, oanda
+    api_key_encrypted = Column(Text, nullable=False)
+    api_secret_encrypted = Column(Text, nullable=False)
+    account_type = Column(String, nullable=False, default="paper")  # paper | live
+    account_id = Column(String, nullable=True)  # OANDA account ID
+    is_verified = Column(Boolean, default=False)
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="broker_connections")
+
+
+class RealPosition(Base):
+    """Open position from a connected broker."""
+
+    __tablename__ = "real_positions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    broker_connection_id = Column(Integer, ForeignKey("broker_connections.id"), nullable=False)
+    symbol = Column(String, nullable=False)
+    quantity = Column(Float, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    current_price = Column(Float, nullable=False)
+    pnl = Column(Float, default=0)
+    pnl_percent = Column(Float, default=0)
+    opened_at = Column(DateTime(timezone=True), server_default=func.now())
+    synced_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class RealTrade(Base):
+    """Executed trade from a connected broker."""
+
+    __tablename__ = "real_trades"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    broker_connection_id = Column(Integer, ForeignKey("broker_connections.id"), nullable=False)
+    strategy_id = Column(Integer, ForeignKey("strategies.id"), nullable=True)
+    symbol = Column(String, nullable=False)
+    side = Column(String, nullable=False)  # buy or sell
+    quantity = Column(Float, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    exit_price = Column(Float, nullable=True)
+    pnl = Column(Float, nullable=True)
+    pnl_percent = Column(Float, nullable=True)
+    opened_at = Column(DateTime(timezone=True), server_default=func.now())
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, default="open")  # open, closed, cancelled

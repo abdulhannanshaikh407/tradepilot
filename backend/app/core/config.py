@@ -33,6 +33,18 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1008
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+# Anthropic (Claude)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+# Groq (free: 30 req/min, Llama 3.3 70B) — https://console.groq.com
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+
+# Google Gemini (free: 15 req/min, Gemini 2.0 Flash) — https://aistudio.google.com
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
 # Webhook
 TRADINGVIEW_WEBHOOK_SECRET = os.getenv("TRADINGVIEW_WEBHOOK_SECRET", "tradepilot-webhook-secret")
 
@@ -62,3 +74,19 @@ AUTOTRADE_PAPER_CAPITAL = float(os.getenv("AUTOTRADE_PAPER_CAPITAL", "10000"))
 # Real execution (optional; paper mode needs none of these)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+
+# Firebase Cloud Messaging
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
+FCM_ENABLED = _get_bool("FCM_ENABLED", bool(FIREBASE_CREDENTIALS_PATH))
+
+# ---- Free market data providers ----
+# Biquote (free, no API key — real-time forex, metals, crypto via SignalR)
+# No config needed, works out of the box.
+
+# Finnhub (free API key at finnhub.io — US stocks, forex, crypto)
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+
+# OANDA (free demo account — forex + metals, real-time + execution)
+OANDA_API_KEY = os.getenv("OANDA_API_KEY", "")
+OANDA_ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "")
+OANDA_ACCOUNT_TYPE = os.getenv("OANDA_ACCOUNT_TYPE", "paper")  # paper | live

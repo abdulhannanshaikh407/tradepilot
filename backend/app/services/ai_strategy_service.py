@@ -16,7 +16,12 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from app.core.config import OPENAI_API_KEY, OPENAI_MODEL
+from app.core.config import (
+    ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
+    GROQ_API_KEY, GROQ_MODEL,
+    GEMINI_API_KEY, GEMINI_MODEL,
+    OPENAI_API_KEY, OPENAI_MODEL,
+)
 from app.services.backtest_engine import validate_rules
 
 DIRECTION_LONG = "LONG"
@@ -395,6 +400,106 @@ def _extract_with_openai(transcript: str) -> Optional[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# Claude extraction (Anthropic)
+# --------------------------------------------------------------------------- #
+def _extract_with_claude(transcript: str) -> Optional[dict]:
+    """Use Claude (Anthropic) to extract a structured strategy from a transcript."""
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your_anthropic_api_key_here":
+        return None
+    try:
+        from anthropic import Anthropic
+
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=1600,
+            temperature=0.2,
+            system=_SYSTEM_PROMPT,
+            messages=[
+                {"role": "user", "content": f"Transcript:\n{transcript[:28000]}"},
+            ],
+        )
+        content = response.content[0].text or ""
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        raw = json.loads(content[start : end + 1])
+        return _clean_strategy(raw, transcript)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Groq extraction (free: 30 req/min, Qwen 3.8 27B)
+# Uses groq SDK directly.
+# Get free key at https://console.groq.com
+# --------------------------------------------------------------------------- #
+def _extract_with_groq(transcript: str) -> Optional[dict]:
+    """Use Groq (Qwen 3.8 27B) to extract a structured strategy — FREE."""
+    if not GROQ_API_KEY or GROQ_API_KEY == "your_groq_api_key_here":
+        return None
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=GROQ_API_KEY)
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_tokens=1600,
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": f"Transcript:\n{transcript[:28000]}"},
+            ],
+        )
+        content = response.choices[0].message.content or ""
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        raw = json.loads(content[start : end + 1])
+        return _clean_strategy(raw, transcript)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Gemini extraction (free: 15 req/min, Gemini 3.6 Flash)
+# Uses google-genai SDK.
+# Get free key at https://aistudio.google.com/app/apikey
+# --------------------------------------------------------------------------- #
+def _extract_with_gemini(transcript: str) -> Optional[dict]:
+    """Use Google Gemini 3.6 Flash to extract a structured strategy — FREE."""
+    if not GEMINI_API_KEY or GEMINI_API_KEY == "your_gemini_api_key_here":
+        return None
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        chat = client.chats.create(
+            model=GEMINI_MODEL,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2,
+                max_output_tokens=1600,
+                system_instruction=_SYSTEM_PROMPT,
+            ),
+        )
+        response = chat.send_message(f"Transcript:\n{transcript[:28000]}")
+        content = response.text or ""
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1:
+            return None
+        raw = json.loads(content[start : end + 1])
+        return _clean_strategy(raw, transcript)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # Deterministic keyword extractor (works without OpenAI, atomic offline demo)
 # --------------------------------------------------------------------------- #
 ASSET_KEYWORDS = {
@@ -574,22 +679,39 @@ def analyze_trading_strategy(
 ) -> Dict[str, Any]:
     """Extract a structured strategy from a transcript.
 
-    Tries OpenAI -> heuristic keyword extraction -> fixed demo strategy.
+    Tries: Groq (free) -> Gemini (free) -> OpenAI (paid) -> Claude (paid) -> heuristic (always free).
     Never raises. Always returns a usable, deterministic structure.
     """
-    # Deterministic demo strategies require no external services.
-    if not OPENAI_API_KEY or OPENAI_API_KEY == "your_openai_api_key_here":
+    has_ai_key = any([
+        GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here",
+        GEMINI_API_KEY and GEMINI_API_KEY != "your_gemini_api_key_here",
+        OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_api_key_here",
+        ANTHROPIC_API_KEY and ANTHROPIC_API_KEY != "your_anthropic_api_key_here",
+    ])
+
+    if not has_ai_key:
         result = _extract_heuristic(transcript)
         result["source"] = "heuristic"
         result["is_demo"] = True
         return result
 
-    result = _extract_with_openai(transcript)
-    if result is not None:
-        result["source"] = "openai"
-        result["is_demo"] = False
-        return result
+    # Try free providers first, then paid
+    for extractor, name in [
+        (_extract_with_groq, "groq"),
+        (_extract_with_gemini, "gemini"),
+        (_extract_with_claude, "claude"),
+        (_extract_with_openai, "openai"),
+    ]:
+        try:
+            result = extractor(transcript)
+            if result is not None:
+                result["source"] = name
+                result["is_demo"] = False
+                return result
+        except Exception:
+            continue
 
+    # Final fallback: heuristic (always free, always works)
     result = _extract_heuristic(transcript)
     result["source"] = "heuristic_fallback"
     result["is_demo"] = True

@@ -346,6 +346,108 @@ class BinanceMarketDataProvider:
 market_data = SimulatedMarketDataProvider()
 binance_market_data = BinanceMarketDataProvider()
 
+
+# --------------------------------------------------------------------------- #
+# Real market data provider (multi-source: Alpaca -> Binance -> yfinance)
+# --------------------------------------------------------------------------- #
+
+ALPACA_DATA_API_KEY = os.getenv("ALPACA_DATA_API_KEY", "")
+ALPACA_DATA_API_SECRET = os.getenv("ALPACA_DATA_API_SECRET", "")
+
+ALPACA_STOCK_SYMBOLS = {
+    "SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA",
+    "AMD", "NFLX", "JPM", "V", "DIS", "PYPL", "BA", "NKE", "WMT", "JNJ",
+}
+
+
+class RealMarketDataProvider:
+    """Multi-source real market data provider.
+
+    Tries sources in order: Alpaca (stocks) -> Binance (crypto) -> yfinance (fallback).
+    Non-crypto assets fall back to simulated data if no real source is available.
+    """
+
+    name = "real"
+
+    def __init__(self) -> None:
+        self._sim = SimulatedMarketDataProvider()
+        self._binance = BinanceMarketDataProvider()
+        self._cache: Dict[str, List[dict]] = {}
+        self._cache_ts: Dict[str, float] = {}
+
+    def get_ohlcv(self, symbol: str, timeframe: str = "4H") -> List[dict]:
+        symbol = normalize_symbol(symbol)
+        if symbol not in ASSETS:
+            raise ValueError(f"Unsupported symbol: {symbol}")
+        if timeframe not in TIMEFRAMES:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        key = f"{symbol}:{timeframe}"
+        now = time.time()
+        if key in self._cache and now - self._cache_ts[key] < 300:
+            return self._cache[key]
+
+        bars = None
+
+        # Try yfinance for stocks
+        if symbol in ALPACA_STOCK_SYMBOLS or ASSETS.get(symbol, {}).get("market") == "index":
+            bars = self._fetch_yfinance(symbol, timeframe)
+
+        # Try Binance for crypto
+        if bars is None and ASSETS.get(symbol, {}).get("market") == "crypto":
+            try:
+                bars = self._binance.get_ohlcv(symbol, timeframe)
+            except Exception:
+                pass
+
+        # Fallback to simulated
+        if bars is None:
+            bars = self._sim.get_ohlcv(symbol, timeframe)
+
+        self._cache[key] = bars
+        self._cache_ts[key] = now
+        return bars
+
+    def _fetch_yfinance(self, symbol: str, timeframe: str) -> Optional[List[dict]]:
+        """Fetch from yfinance (slow fallback)."""
+        try:
+            import yfinance as yf
+        except ImportError:
+            return None
+
+        yf_symbol = symbol.replace("/", "-").replace("USD", "-USD") if "/" in symbol else symbol
+        tf_map = {"15m": "15m", "1H": "1h", "4H": "1h", "1D": "1d"}
+        yf_interval = tf_map.get(timeframe, "1h")
+
+        try:
+            data = yf.download(yf_symbol, period="2y", interval=yf_interval, progress=False)
+            if data.empty:
+                return None
+
+            bars = []
+            for idx, row in data.iterrows():
+                bars.append({
+                    "timestamp": idx.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "open": float(row["Open"]),
+                    "high": float(row["High"]),
+                    "low": float(row["Low"]),
+                    "close": float(row["Close"]),
+                    "volume": float(row["Volume"]),
+                })
+            return bars if bars else None
+        except Exception:
+            return None
+
+    def latest_quote(self, symbol: str, timeframe: str = "4H") -> dict:
+        bars = self.get_ohlcv(symbol, timeframe)
+        return bars[-1]
+
+    def assets(self) -> List[str]:
+        return list(ASSETS.keys())
+
+
+real_market_data = RealMarketDataProvider()
+
 MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "simulated").strip().lower()
 
 
@@ -353,11 +455,44 @@ def get_provider() -> MarketDataProvider:
     """Return the active market-data provider.
 
     ``MARKET_DATA_PROVIDER=binance`` enables live Binance data for crypto;
-    anything else uses the deterministic simulated provider. Simulated is the
-    default so tests, CI and the demo workspace never depend on the network.
+    ``MARKET_DATA_PROVIDER=real`` uses multi-source real data (yfinance fallback);
+    ``MARKET_DATA_PROVIDER=biquote`` uses Biquote free API for forex/metals/crypto;
+    ``MARKET_DATA_PROVIDER=finnhub`` uses Finnhub free API (needs FINNHUB_API_KEY);
+    ``MARKET_DATA_PROVIDER=gold_forex`` uses multi-source gold+forex aggregator;
+    ``MARKET_DATA_PROVIDER=mtsocket`` uses MTSocket free API (XAUUSD + forex);
+    anything else uses the deterministic simulated provider.
     """
     if MARKET_DATA_PROVIDER == "binance":
         return binance_market_data
+    if MARKET_DATA_PROVIDER == "real":
+        return real_market_data
+    if MARKET_DATA_PROVIDER == "biquote":
+        try:
+            from app.services.biquote_provider import biquote_provider
+            return biquote_provider
+        except Exception:
+            return market_data
+    if MARKET_DATA_PROVIDER == "finnhub":
+        try:
+            from app.services.finnhub_provider import get_finnhub_provider
+            p = get_finnhub_provider()
+            if p:
+                return p
+        except Exception:
+            pass
+        return market_data
+    if MARKET_DATA_PROVIDER == "gold_forex":
+        try:
+            from app.services.gold_forex_provider import gold_forex_provider
+            return gold_forex_provider
+        except Exception:
+            return market_data
+    if MARKET_DATA_PROVIDER == "mtsocket":
+        try:
+            from app.services.mtsocket_provider import mtsocket_provider
+            return mtsocket_provider
+        except Exception:
+            return market_data
     return market_data
 
 

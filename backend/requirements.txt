@@ -19,7 +19,11 @@ PyJWT==2.10.1
 # ---- External services ----
 youtube-transcript-api==1.2.4
 openai==1.57.1
+anthropic==0.40.0
+google-genai==1.14.0
+firebase-admin==6.6.0
 httpx==0.28.1
+pysignalr==1.1.0
 
 # ---- Misc ----
 python-multipart==0.0.19
