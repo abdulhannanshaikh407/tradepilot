@@ -1,21 +1,26 @@
 # app/main.py
 import logging
 import time
+from collections import defaultdict
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import (
+    alert_preferences,
     auth,
     autotrade,
     backtests,
     billing,
+    brokers,
     dashboard,
+    devices,
     health,
     market,
     notifications,
     performance,
+    pinescript,
     settings,
     signals,
     strategies,
@@ -44,12 +49,7 @@ _WEAK_WEBHOOK_SECRETS = {"tradepilot-webhook-secret", "changeme", "secret", ""}
 
 
 def _assert_production_secrets() -> None:
-    """Refuse to boot in production with default/weak secrets.
-
-    A production deployment that forgets to set its secrets would otherwise
-    silently ship forgeable JWTs and an open webhook that any caller could
-    authenticate against.
-    """
+    """Refuse to boot in production with default/weak secrets."""
     if ENVIRONMENT != "production":
         return
     problems = []
@@ -81,16 +81,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---- Rate limiting (simple in-memory, per-IP) ----
+_rate_limits: dict[str, list[float]] = defaultdict(list)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX = 300    # requests per window per IP (generous for production)
+RATE_LIMIT_ENABLED = ENVIRONMENT != "test"
+
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def rate_limit_log_and_seed(request: Request, call_next):
+    # Deferred seeding on first non-health request
+    global _seeded
+    path = request.url.path
+    if not _seeded and path not in ("/health", "/docs", "/openapi", "/redoc"):
+        _seeded = True
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            loop.create_task(asyncio.to_thread(seed.seed_demo_data))
+            logger.info("Demo data seeding started in background")
+        except Exception:
+            logger.exception("Deferred demo seeding failed")
+
+    # Rate limit: skip health/docs endpoints and test mode
+    client_ip = request.client.host if request.client else "unknown"
+    if RATE_LIMIT_ENABLED and not path.startswith("/health") and not path.startswith("/docs") and not path.startswith("/openapi"):
+        now = time.time()
+        _rate_limits[client_ip] = [t for t in _rate_limits[client_ip] if now - t < RATE_LIMIT_WINDOW]
+        if len(_rate_limits[client_ip]) >= RATE_LIMIT_MAX:
+            return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again later."})
+        _rate_limits[client_ip].append(now)
+
     start = time.perf_counter()
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
+
+    # Security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
     logger.info(
         "%s %s -> %s (%.1fms)",
         request.method,
-        request.url.path,
+        path,
         response.status_code,
         duration_ms,
     )
@@ -121,6 +158,10 @@ app.include_router(billing.router)
 app.include_router(settings.router)
 app.include_router(market.router)
 app.include_router(autotrade.router)
+app.include_router(pinescript.router)
+app.include_router(alert_preferences.router)
+app.include_router(devices.router)
+app.include_router(brokers.router)
 
 # Create tables (dev convenience; production uses Alembic migrations).
 Base.metadata.create_all(bind=engine)
@@ -129,21 +170,21 @@ from app.db import seed  # noqa: E402
 
 seed.ensure_demo_user()
 
+_seeded = False
+
 
 @app.on_event("startup")
-async def seed_and_start_bg() -> None:
-    """Seed the demo workspace and start the auto-trade monitor loop."""
+async def start_bg() -> None:
+    """Start the auto-trade monitor loop. Demo seeding deferred to first request."""
     import asyncio
 
     from app.core.config import AUTOTRADE_ENABLED, AUTOTRADE_INTERVAL
     from app.services import autotrade
 
-    asyncio.create_task(asyncio.to_thread(seed.seed_demo_data))
-
     if AUTOTRADE_ENABLED and AUTOTRADE_INTERVAL >= 30:
 
         async def monitor_loop() -> None:
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
             autotrade.STATE["running"] = True
             logger.info("Auto-trade monitor started (interval %ss)", AUTOTRADE_INTERVAL)
             try:

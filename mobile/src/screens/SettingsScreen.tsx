@@ -40,6 +40,13 @@ export function SettingsScreen() {
         </Card>
       ) : null}
       <Card style={styles.cardGap}>
+        <Button
+          title="Broker Settings"
+          onPress={() => navigation.navigate("BrokerSettings" as never)}
+          variant="secondary"
+        />
+      </Card>
+      <Card style={styles.cardGap}>
         <Row left="API server" right={baseUrl()} />
         <Text style={styles.hint}>
           Point the app at your deployed backend by setting EXPO_PUBLIC_API_URL before building the app.

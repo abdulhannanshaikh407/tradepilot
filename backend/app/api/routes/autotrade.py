@@ -37,6 +37,7 @@ def _config_out(config: models.AutoTradeConfig, strategy: models.Strategy) -> Au
     return AutoTradeConfigOut(
         id=config.id,
         strategy_id=config.strategy_id,
+        broker_connection_id=config.broker_connection_id,
         strategy_name=strategy.name,
         strategy_symbol=strategy.asset,
         strategy_timeframe=strategy.timeframe,
@@ -116,16 +117,29 @@ def create_config(
         return _config_out(existing, strategy)
 
     mode = "paper"
-    if payload.mode == "live" and not get_broker("live"):
-        raise HTTPException(
-            status_code=400,
-            detail="Live mode requires BINANCE_API_KEY / BINANCE_API_SECRET on the server.",
-        )
+    if payload.mode == "live":
+        if payload.broker_connection_id:
+            broker_conn = db.query(models.BrokerConnection).filter(
+                models.BrokerConnection.id == payload.broker_connection_id,
+                models.BrokerConnection.user_id == user.id,
+                models.BrokerConnection.account_type == "live",
+            ).first()
+            if not broker_conn:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid broker connection. Connect a live broker first.",
+                )
+        elif not get_broker("live"):
+            raise HTTPException(
+                status_code=400,
+                detail="Live mode requires a broker connection or server-side BINANCE_API_KEY.",
+            )
     mode = payload.mode
 
     config = models.AutoTradeConfig(
         user_id=user.id,
         strategy_id=strategy.id,
+        broker_connection_id=payload.broker_connection_id,
         enabled=payload.enabled,
         mode=mode,
         capital=payload.capital,
@@ -163,11 +177,19 @@ def update_config(
     for field, value in payload.model_dump(exclude_unset=True).items():
         if value is None:
             continue
-        if field == "mode" and value == "live" and not get_broker("live"):
-            raise HTTPException(
-                status_code=400,
-                detail="Live mode requires BINANCE_API_KEY / BINANCE_API_SECRET on the server.",
-            )
+        if field == "mode" and value == "live" and not config.broker_connection_id:
+            if not get_broker("live"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Live mode requires a broker connection or server-side BINANCE_API_KEY.",
+                )
+        if field == "broker_connection_id" and value is not None:
+            broker_conn = db.query(models.BrokerConnection).filter(
+                models.BrokerConnection.id == value,
+                models.BrokerConnection.user_id == user.id,
+            ).first()
+            if not broker_conn:
+                raise HTTPException(status_code=400, detail="Invalid broker connection.")
         setattr(config, field, value)
 
     db.commit()

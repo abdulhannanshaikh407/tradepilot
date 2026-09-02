@@ -36,6 +36,15 @@ logger = logging.getLogger("tradepilot.autotrade")
 # Module-level engine state surfaced by GET /autotrade/status.
 STATE = {"running": False, "last_run_at": None, "last_error": None, "strategies_watched": 0}
 
+# Safety limits for live trading
+SAFETY_LIMITS = {
+    "max_position_size_percent": 5,      # Max 5% of account per trade
+    "max_concurrent_positions": 3,       # Max 3 open at once
+    "max_daily_loss_percent": 2,         # Stop if down 2% in a day
+    "max_leverage": 1.0,                 # No margin/leverage for MVP
+    "cooldown_seconds": 60,              # Min 60s between orders
+}
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -43,6 +52,67 @@ def _now() -> datetime:
 
 def _quote_price(symbol: str, timeframe: str) -> float:
     return float(get_provider().get_ohlcv(symbol, timeframe)[-1]["close"])
+
+
+def _get_user_broker(db: Session, config: models.AutoTradeConfig, timeframe: str):
+    """Get broker for a config: use user's connected broker if available, else server-level."""
+    if config.mode == "live" and config.broker_connection_id:
+        from app.core.encryption import decrypt_value
+        from app.services.broker_connector import BrokerConnector
+        from app.services.alpaca_connector import AlpacaConnector
+        from app.services.binance_connector import BinanceConnector
+
+        conn = db.query(models.BrokerConnection).filter(
+            models.BrokerConnection.id == config.broker_connection_id,
+            models.BrokerConnection.user_id == config.user_id,
+        ).first()
+        if conn:
+            api_key = decrypt_value(conn.api_key_encrypted)
+            api_secret = decrypt_value(conn.api_secret_encrypted)
+            if conn.broker_name == "alpaca":
+                return AlpacaConnector(api_key, api_secret, conn.account_type)
+            elif conn.broker_name == "binance":
+                return BinanceConnector(api_key, api_secret)
+    return get_broker(config.mode, timeframe)
+
+
+def _safety_check(db: Session, config: models.AutoTradeConfig, account_balance: float, signal_size: float) -> bool:
+    """Refuse order if any safety limit is violated."""
+    # Check 1: Position size cap (max 5% of account)
+    if account_balance > 0 and (signal_size / account_balance) > SAFETY_LIMITS["max_position_size_percent"] / 100:
+        return False
+
+    # Check 2: Max concurrent positions
+    open_count = (
+        db.query(models.Position)
+        .filter(
+            models.Position.user_id == config.user_id,
+            models.Position.status == models.TradeStatus.OPEN.value,
+        )
+        .count()
+    )
+    if open_count >= SAFETY_LIMITS["max_concurrent_positions"]:
+        return False
+
+    # Check 3: Daily loss cap (if max_daily_loss is set)
+    if config.max_daily_loss and config.capital > 0:
+        today = _now().date()
+        day_start = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+        closed = (
+            db.query(models.Position)
+            .filter(
+                models.Position.user_id == config.user_id,
+                models.Position.strategy_id == config.strategy_id,
+                models.Position.status == models.TradeStatus.CLOSED.value,
+                models.Position.closed_at >= day_start,
+            )
+            .all()
+        )
+        lost = -sum(p.realized_pnl or 0.0 for p in closed)
+        if lost > 0 and lost / config.capital >= config.max_daily_loss:
+            return False
+
+    return True
 
 
 def _position_pnl(position: models.Position, current: float) -> tuple:
@@ -110,9 +180,9 @@ def _open_position(db: Session, config: models.AutoTradeConfig, strategy: models
     if not stop:
         stop = entry * 0.98  # no explicit stop -> 2% default
 
-    broker = get_broker(config.mode, strategy.timeframe)
+    broker = _get_user_broker(db, config, strategy.timeframe)
     if broker is None:
-        config.last_error = "Live trading armed but BINANCE_API_KEY/BINANCE_API_SECRET are not configured."
+        config.last_error = "Live trading armed but no broker connection configured."
         config.mode = "paper"
         db.commit()
         create_notification(
@@ -121,7 +191,15 @@ def _open_position(db: Session, config: models.AutoTradeConfig, strategy: models
         )
         return {"skipped": True, "reason": config.last_error}
 
-    capital = config.capital if config.mode == "live" else config.capital or 0.0
+    # For broker connectors with async API, we need to handle sync wrappers
+    from app.services.broker_connector import BrokerConnector as BC
+    if isinstance(broker, BC):
+        import asyncio
+        account = asyncio.get_event_loop().run_until_complete(broker.get_account())
+        capital = account.balance if config.mode == "live" else config.capital
+    else:
+        capital = config.capital if config.mode == "live" else config.capital or 0.0
+
     risk_amount = capital * (config.risk_percent / 100.0)
     sl_distance = abs(entry - stop) or entry * 0.001
     size = risk_amount / sl_distance
@@ -132,46 +210,78 @@ def _open_position(db: Session, config: models.AutoTradeConfig, strategy: models
         db.commit()
         return {"skipped": True, "reason": config.last_error}
 
-    fill = broker.buy_quote(symbol, round(size * entry, 8))
+    # Safety check before placing order
+    if config.mode == "live" and not _safety_check(db, config, capital, size * entry):
+        config.last_error = "Safety check failed (position size, concurrent positions, or daily loss)."
+        db.commit()
+        return {"skipped": True, "reason": config.last_error}
+
+    # Place order via broker connector or legacy broker
+    from app.services.broker_connector import BrokerConnector as BC
+    if isinstance(broker, BC):
+        import asyncio
+        order = asyncio.get_event_loop().run_until_complete(
+            broker.place_order(symbol, size, "buy", "market")
+        )
+        fill_price = order.filled_price or entry
+        fill_qty = order.quantity
+        fill_quote = fill_qty * fill_price
+    else:
+        fill = broker.buy_quote(symbol, round(size * entry, 8))
+        fill_price = fill.price
+        fill_qty = fill.base_qty
+        fill_quote = fill.quote
+
     position = models.Position(
         user_id=config.user_id,
         strategy_id=strategy.id,
         symbol=symbol,
         direction="LONG",
         handler="autotrade",
-        broker=broker.name,
+        broker=broker.name if hasattr(broker, 'name') else config.mode,
         status=models.TradeStatus.OPEN.value,
-        entry_price=fill.price,
-        current_price=fill.price,
+        entry_price=fill_price,
+        current_price=fill_price,
         stop_loss=stop,
         take_profit=suggestion.get("take_profit"),
-        size=fill.base_qty,
-        cost=fill.quote,
+        size=fill_qty,
+        cost=fill_quote,
     )
     db.add(position)
     db.commit()
     db.refresh(position)
     create_notification(
         db, config.user_id, "position_opened", "Position opened",
-        f"{broker.name.upper()} {symbol} LONG @ {fill.price} (size {fill.base_qty}) "
+        f"{broker.name if hasattr(broker, 'name') else config.mode} {symbol} LONG @ {fill_price} (size {fill_qty}) "
         f"stop {stop} / target {suggestion.get('take_profit') or '-'}.",
         strategy.user.email,
     )
-    return {"opened": True, "position_id": position.id, "symbol": symbol, "price": fill.price}
+    return {"opened": True, "position_id": position.id, "symbol": symbol, "price": fill_price}
 
 
-def _close_position(db: Session, position: models.Position, reason: str, broker: Broker, current: float) -> dict:
-    fill = broker.sell_base(position.symbol, position.size)
+def _close_position(db: Session, position: models.Position, reason: str, broker, current: float) -> dict:
+    from app.services.broker_connector import BrokerConnector as BC
+
+    if isinstance(broker, BC):
+        import asyncio
+        order = asyncio.get_event_loop().run_until_complete(
+            broker.close_position(position.symbol)
+        )
+        fill_price = order.filled_price or current
+    else:
+        fill = broker.sell_base(position.symbol, position.size)
+        fill_price = fill.price
+
     position.exit_reason = reason
-    position.current_price = fill.price
+    position.current_price = fill_price
     position.status = models.TradeStatus.CLOSED.value
     position.closed_at = _now()
-    position.realized_pnl = round((fill.price - position.entry_price) * position.size, 8)
-    position.pnl_percent = round((fill.price - position.entry_price) / position.entry_price * 100.0, 4)
+    position.realized_pnl = round((fill_price - position.entry_price) * position.size, 8)
+    position.pnl_percent = round((fill_price - position.entry_price) / position.entry_price * 100.0, 4)
     db.commit()
     create_notification(
         db, position.user_id, "position_closed", "Position closed",
-        f"{position.symbol} {position.direction} closed ({reason}) @ {fill.price} "
+        f"{position.symbol} {position.direction} closed ({reason}) @ {fill_price} "
         f"PnL {position.realized_pnl:.2f} ({position.pnl_percent:+.2f}%)",
         "",
     )
@@ -191,7 +301,10 @@ def _manage_open_positions(db: Session, config: models.AutoTradeConfig, strategy
         current = _quote_price(position.symbol, strategy.timeframe)
         position.current_price = current
         position.unrealized_pnl, position.pnl_percent = _position_pnl(position, current)
-        broker = get_broker(position.broker, strategy.timeframe) or get_broker("paper", strategy.timeframe)
+
+        # Get broker for this position
+        from app.services.broker_connector import BrokerConnector as BC
+        broker = _get_user_broker(db, config, strategy.timeframe) or get_broker("paper", strategy.timeframe)
 
         hit = None
         if position.direction == "LONG":

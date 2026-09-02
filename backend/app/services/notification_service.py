@@ -42,6 +42,33 @@ class InAppStore:
         return True
 
 
+class FCMProvider:
+    """Sends push notifications via Firebase Cloud Messaging when configured."""
+    name = "fcm"
+
+    def send(self, title: str, message: str, user_email: str, db: Session = None, user_id: int = None) -> bool:
+        if db is None or user_id is None:
+            return False
+        try:
+            from app.services.fcm_service import send_push_to_tokens
+
+            tokens = [
+                d.token
+                for d in db.query(models.DeviceToken)
+                .filter(
+                    models.DeviceToken.user_id == user_id,
+                    models.DeviceToken.is_active == True,
+                )
+                .all()
+            ]
+            if not tokens:
+                return False
+            result = send_push_to_tokens(tokens, title, message, {"type": "notification"})
+            return result["sent"] > 0
+        except Exception:
+            return False
+
+
 class TelegramProvider:
     """Sends a Telegram message when TELEGRAM_BOT_TOKEN and CHAT_ID are set."""
     name = "telegram"
@@ -72,7 +99,7 @@ class EmailProvider:
 
 
 def get_providers() -> List:
-    return [TelegramProvider(), EmailProvider()]
+    return [TelegramProvider(), FCMProvider(), EmailProvider()]
 
 
 def create_notification(
@@ -89,7 +116,10 @@ def create_notification(
 
     for provider in get_providers():
         try:
-            provider.send(title, message, user_email)
+            if provider.name == "fcm":
+                provider.send(title, message, user_email, db=db, user_id=user_id)
+            else:
+                provider.send(title, message, user_email)
         except Exception:
             continue
 

@@ -124,6 +124,11 @@ class MTSocketProvider:
             }
         return {"symbol": symbol, "bid": 0, "ask": 0, "last": 0, "volume": 0}
 
+    def get_ohlcv(self, symbol: str, timeframe: str = "1H") -> List[dict]:
+        """MTSocket provides live ticks only; fall back to simulated for OHLCV."""
+        from app.services.market_data_service import SimulatedMarketDataProvider
+        return SimulatedMarketDataProvider().get_ohlcv(symbol, timeframe)
+
     def close(self):
         self._client.close()
 

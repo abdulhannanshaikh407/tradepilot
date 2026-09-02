@@ -7,6 +7,12 @@
    - Backend: https://tradepilot-xfk2.onrender.com
    - Frontend: https://frontend-l6we17khh-abdulhannanshaikh407s-projects.vercel.app
    - GitHub: https://github.com/abdulhannanshaikh407/tradepilot
+4. **YouTube Parser (Claude API)**: Paste YouTube link → Claude extracts strategy → auto-fill builder. Done.
+5. **PineScript Generator**: Strategy JSON → TradingView PineScript v5. Done.
+6. **Strategy Builder UI**: React Flow drag-drop visual editor. Done.
+7. **Alert Management**: Toggle alerts on/off per strategy. Done.
+8. **Firebase Cloud Messaging**: Mobile push notifications. Done.
+9. **PlayStore Submission**: EAS config, store listing, submission guide. Done.
 
 ## Backend: auto-trade engine (done, verified via pytest — **73 tests green**)
 - **`app/db/models.py`**: `AutoTradeConfig` (enabled, mode paper/live, capital, risk_percent, slippage_percent, max_concurrent, max_daily_loss, cooldown_minutes, last_run_at, last_error) + `Position` (symbol, direction, broker, status, entry/current/stop/take, size, cost, pnl, exit_reason, opened_at, closed_at) + User relationships.
@@ -26,10 +32,60 @@
 - `app.json` (com.tradepilot.app, android + ios), `eas.json` (development/preview/production, autoIncrement), `mobile/README.md` store-submission guide.
 - **Safety**: phone is a remote control; analysis/execution live in backend; live arming requires server keys + explicit `mode=live`.
 
+### Mobile: Push Notifications + PlayStore prep (2026-08-31 session)
+- Added `expo-notifications` for FCM push
+- `src/notifications.ts`: register for push, register device token with backend, notification listeners
+- `src/api.ts`: `registerDevice()`, `testPush()` methods
+- `App.tsx`: auto-registers push on login, sets up notification handlers
+- `app.json`: added notification permissions, `googleServicesFile`
+- `.env.production`: production API URL
+- `eas.json`: Android app-bundle build, internal track submit config
+- `store-listing.md`: Play Store listing text
+- `PLAYSTORE_SUBMISSION.md`: Step-by-step submission guide
+
 ## Backend: market data + optimizer (prior, still green)
 - 38 symbols, Binance klines provider (`MARKET_DATA_PROVIDER=binance`, 120s cache, fallback to simulated), `LiveQuoteStore` + `/market/live`, `/market/ohlcv?live=1`, webhook symbol normalization, signal engine uses live quotes (`data_source`), optimizer (grid + walk-forward), risk-adjusted metrics.
 - TradingView integration: `TRADINGVIEW_SETUP.md` updated (XAUUSD-first template, live prices); dashboard TradingView page with OANDA XAUUSD chart + presets + 20s watchlist poll.
 - Backtest-vanishing fix: `tp_last_backtest_result` sessionStorage + `PageErrorBoundary` in `_app.tsx`.
+
+### Frontend: Strategy Builder UI (2026-08-31 session)
+- `pages/dashboard/builder.tsx`: 680-line React Flow visual strategy editor
+- 5 node types: Indicator, Condition, Entry, Exit, Risk Management
+- Drag-drop from "Add Node" panel, connect with animated edges
+- Inline editing on each node (settings icon)
+- Top bar: strategy name, asset, timeframe, LONG/SHORT toggle
+- Generate PineScript button → modal with copy-to-clipboard
+- Save Strategy → POST to `/strategies` API
+- `components/Layout.tsx`: Added "Strategy Builder" nav item
+- `package.json`: Added `reactflow@11.11.4`
+
+## Backend: new features (2026-08-31 session)
+
+### YouTube Parser — Claude API (`backend/app/services/ai_strategy_service.py`)
+- Added `_extract_with_claude()` using Anthropic SDK (claude-sonnet-4-20250514)
+- `analyze_trading_strategy()` now tries: Claude → OpenAI → heuristic → demo
+- Config: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` in `config.py`
+- Dependency: `anthropic==0.40.0`
+
+### PineScript Generator (`backend/app/services/pinescript_service.py`)
+- 310-line service converting strategy JSON → TradingView PineScript v5
+- 8 indicators: RSI, SMA, EMA, MACD, Bollinger Bands, ATR, Stochastic, ADX, Donchian
+- 18 condition types mapped to Pine expressions
+- Auto-declares indicators referenced by rules but not in indicator list
+- Entry/exit logic, SL/TP via `strategy.exit()`, visual plots
+- API: `GET /pinescript/strategy/{id}`, `POST /pinescript/generate`
+
+### Alert Preferences (`backend/app/api/routes/alert_preferences.py`)
+- `AlertPreference` model: per-strategy toggles (alerts, push, email, in-app, min_confidence)
+- `GET /alert-preferences/`, `GET|PUT /alert-preferences/strategy/{id}`, `PATCH .../toggle`
+- Auto-creates defaults on first access
+
+### Device Tokens + FCM (`backend/app/api/routes/devices.py`, `app/services/fcm_service.py`)
+- `DeviceToken` model: stores FCM tokens (android/ios/web), active flag
+- `POST /devices/register`, `DELETE /devices/unregister`, `GET /devices/`, `POST /devices/test-push`
+- `FCMProvider` in notification_service.py: auto-sends push on every in-app notification
+- Firebase Admin SDK lazy init (no crash without config)
+- Config: `FIREBASE_CREDENTIALS_PATH`, `FCM_ENABLED`
 
 ## Old Objective (original session)
 Bring TradePilot AI toward production readiness (backend FastAPI + frontend Next.js).

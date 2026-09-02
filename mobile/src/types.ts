@@ -114,3 +114,30 @@ export interface NotificationItem {
   is_read: boolean;
   created_at?: string | null;
 }
+
+export interface BrokerConnection {
+  id: number;
+  broker: string;
+  account_type: string;
+  is_verified: boolean;
+  last_verified_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface BrokerAccount {
+  balance: number;
+  buying_power: number;
+  cash: number;
+  account_type: string;
+  broker_name: string;
+  daily_pnl: number;
+  daily_pnl_percent: number;
+  positions: {
+    symbol: string;
+    quantity: number;
+    entry_price: number;
+    current_price: number;
+    pnl: number;
+    pnl_percent: number;
+  }[];
+}

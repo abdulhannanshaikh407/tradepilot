@@ -26,7 +26,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B1120"
       },
-      "permissions": ["INTERNET"]
+      "permissions": ["INTERNET", "RECEIVE_BOOT_COMPLETED", "VIBRATE", "SCHEDULE_EXACT_ALARM"],
+      "googleServicesFile": "./google-services.json"
     },
     "extra": {
       "apiUrl": ""

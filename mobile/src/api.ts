@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { AutoTradeConfig, AutoTradeStatus, AuthResponse, DashboardStats, NotificationItem, Position, Signal, Strategy, User } from "./types";
+import type { AutoTradeConfig, AutoTradeStatus, AuthResponse, BrokerConnection, BrokerAccount, DashboardStats, NotificationItem, Position, Signal, Strategy, User } from "./types";
 
 const API_URL = (process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 const TOKEN_KEY = "tp_token";
@@ -85,4 +85,21 @@ export const api = {
   positions: () => request<Position[]>("/autotrade/positions"),
   closePosition: (id: number) =>
     request<Position>(`/autotrade/positions/${id}/close`, { method: "POST" }),
+  registerDevice: (body: { token: string; platform: string }) =>
+    request<{ id: number; message: string }>("/devices/register", { method: "POST", body: JSON.stringify(body) }),
+  testPush: () => request<{ message: string }>("/devices/test-push", { method: "POST" }),
+  // Broker connections
+  connectBroker: (body: { broker: string; api_key: string; api_secret: string; account_type: string }) =>
+    request<{ connection_id: number; broker: string; account_type: string; is_verified: boolean }>(
+      "/brokers/connect", { method: "POST", body: JSON.stringify(body) }
+    ),
+  getConnectedBrokers: () => request<BrokerConnection[]>("/brokers/connected"),
+  getBrokerAccount: (connectionId: number) =>
+    request<BrokerAccount>(`/brokers/${connectionId}/account`),
+  getBrokerPositions: (connectionId: number) =>
+    request<{ symbol: string; quantity: number; entry_price: number; current_price: number; pnl: number; pnl_percent: number }[]>(
+      `/brokers/${connectionId}/positions`
+    ),
+  disconnectBroker: (connectionId: number) =>
+    request<void>(`/brokers/${connectionId}`, { method: "DELETE" }),
 };

@@ -324,6 +324,7 @@ class SettingsUpdate(BaseModel):
 # ---------- Auto-trade ----------
 class AutoTradeConfigCreate(BaseModel):
     strategy_id: int
+    broker_connection_id: Optional[int] = None
     enabled: bool = False
     mode: str = "paper"  # "paper" | "live"
     capital: float = 10000.0
@@ -335,6 +336,7 @@ class AutoTradeConfigCreate(BaseModel):
 
 
 class AutoTradeConfigUpdate(BaseModel):
+    broker_connection_id: Optional[int] = None
     enabled: Optional[bool] = None
     mode: Optional[str] = None
     capital: Optional[float] = None
@@ -348,6 +350,7 @@ class AutoTradeConfigUpdate(BaseModel):
 class AutoTradeConfigOut(BaseModel):
     id: int
     strategy_id: int
+    broker_connection_id: Optional[int] = None
     strategy_name: Optional[str] = None
     strategy_symbol: Optional[str] = None
     strategy_timeframe: Optional[str] = None
@@ -395,3 +398,25 @@ class AutoTradeStatus(BaseModel):
     strategies_watched: int
     open_positions: int
     live_available: bool
+
+
+# ---------- Alert Preferences ----------
+class AlertPreferenceUpdate(BaseModel):
+    alerts_enabled: Optional[bool] = None
+    push_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    in_app_enabled: Optional[bool] = None
+    min_confidence: Optional[int] = None
+
+
+class AlertPreferenceOut(ORMModel):
+    id: int
+    strategy_id: int
+    strategy_name: Optional[str] = None
+    alerts_enabled: bool
+    push_enabled: bool
+    email_enabled: bool
+    in_app_enabled: bool
+    min_confidence: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

@@ -9,11 +9,17 @@ import { api, loadToken, setToken } from "./src/api";
 import { colors } from "./src/theme";
 import type { User } from "./src/types";
 import { AutoTradeScreen } from "./src/screens/AutoTradeScreen";
+import { BrokerSettingsScreen } from "./src/screens/BrokerSettingsScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { SignalsScreen } from "./src/screens/SignalsScreen";
 import { StrategiesScreen } from "./src/screens/StrategiesScreen";
+import {
+  registerForPushNotifications,
+  registerDeviceToken,
+  setupNotificationListeners,
+} from "./src/notifications";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -79,6 +85,31 @@ export default function App() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const setupPush = async () => {
+      const token = await registerForPushNotifications();
+      if (token) {
+        const platform: "android" | "ios" | "web" =
+          require("react-native").Platform.OS === "android" ? "android" : "ios";
+        await registerDeviceToken(token, platform);
+      }
+    };
+    setupPush();
+
+    const cleanup = setupNotificationListeners(
+      (notification) => {
+        console.log("Notification received:", notification.request.content);
+      },
+      (response) => {
+        console.log("Notification tapped:", response.notification.request.content);
+      }
+    );
+
+    return cleanup;
+  }, [user]);
+
   const onAuthed = useCallback((u: User) => setUser(u), []);
 
   if (!booted) {
@@ -102,6 +133,11 @@ export default function App() {
             {() => <LoginScreen onAuthed={onAuthed} />}
           </Stack.Screen>
         )}
+        <Stack.Screen
+          name="BrokerSettings"
+          component={BrokerSettingsScreen}
+          options={{ headerShown: true, title: "Broker Settings", headerStyle: { backgroundColor: colors.card }, headerTintColor: colors.text }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

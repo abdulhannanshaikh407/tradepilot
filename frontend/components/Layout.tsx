@@ -18,6 +18,8 @@ import {
   X,
   Zap,
   CreditCard,
+  Layers,
+  Building2,
 } from "lucide-react";
 
 import { api, timeAgo, TOKEN_KEY } from "lib/api";
@@ -27,12 +29,14 @@ import { useToast } from "./ui";
 
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/builder", label: "Strategy Builder", icon: Layers },
   { href: "/dashboard/analyzer", label: "YouTube Analyzer", icon: Video },
   { href: "/dashboard/strategies", label: "Strategies", icon: Zap },
   { href: "/dashboard/signals", label: "Signals", icon: Signal },
   { href: "/dashboard/backtesting", label: "Backtesting", icon: BarChart3 },
   { href: "/dashboard/performance", label: "Performance", icon: Flame },
   { href: "/dashboard/tradingview", label: "TradingView", icon: Radio },
+  { href: "/dashboard/broker-settings", label: "Broker Settings", icon: Building2 },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];

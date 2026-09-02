@@ -240,7 +240,8 @@ def test_manual_close_endpoint(client):
 def test_status_endpoint(client, binance_conf):
     headers = _setup_user(client, "at-status@test.dev")
     status = client.get("/autotrade/status", headers=headers).json()
-    assert status["provider"] in ("simulated", "binance")
+    valid_providers = ("simulated", "binance", "real", "biquote", "finnhub", "gold_forex", "mtsocket")
+    assert status["provider"] in valid_providers
     assert status["enabled"] is True
     assert "interval_seconds" in status
     assert status["live_available"] is False

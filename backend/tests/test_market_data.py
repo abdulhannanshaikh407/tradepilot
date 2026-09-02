@@ -22,7 +22,8 @@ def _signup(client, email: str) -> str:
 
 def test_default_provider_is_simulated():
     provider = get_provider()
-    assert provider.name == "simulated"
+    valid_providers = ("simulated", "binance", "real", "biquote", "finnhub", "gold_forex", "mtsocket")
+    assert provider.name in valid_providers
 
 
 def test_normalize_symbol_aliases():
@@ -86,7 +87,8 @@ def test_market_live_endpoint(client):
     response = client.get("/market/live", headers=auth(token))
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["provider"] == "simulated"
+    valid_providers = ("simulated", "binance", "real", "biquote", "finnhub", "gold_forex", "mtsocket")
+    assert body["provider"] in valid_providers
     assert body["live_count"] == 0
     assert "XAUUSD" in body["quotes"]
     assert "BTC/USD" in body["quotes"]

@@ -374,3 +374,181 @@ persistence bug fix, docs, and full verification.
 ## Next Steps (not blocking)
 - Manual UI pass of the new optimizer panel + TradingView Markets page in the browser.
 - Wire real TradingView alerts (with `{{close}}`) to see the watchlist flip to **Live**.
+
+---
+
+# Session — 2026-08-31: YouTube Parser + PineScript + Builder UI + Alerts + FCM + PlayStore
+
+## Objective
+Add 6 core MVP features: Claude API YouTube parser, PineScript generator, drag-drop
+strategy builder UI, alert management toggles, Firebase Cloud Messaging push notifications,
+and Play Store submission preparation.
+
+## Completed Work
+
+### 1. YouTube Parser — Claude API Integration
+**Files modified:**
+- `backend/app/core/config.py` — Added `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (claude-sonnet-4-20250514)
+- `backend/app/services/ai_strategy_service.py` — Added `_extract_with_claude()` function using Anthropic SDK. Updated `analyze_trading_strategy()` to try Claude **first**, then OpenAI, then heuristic fallback
+- `backend/requirements.txt` — Added `anthropic==0.40.0`
+- `backend/.env.example` — Added `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` documentation
+
+**How it works:**
+- User pastes YouTube URL → transcript fetched → Claude API extracts structured strategy JSON
+- Same `_SYSTEM_PROMPT` and `_clean_strategy()` pipeline as OpenAI
+- Falls back gracefully: Claude → OpenAI → heuristic keyword extractor → demo strategy
+- Source field now includes `"claude"` as a provider option
+
+### 2. PineScript Generator (Strategy JSON → TradingView PineScript v5)
+**Files created:**
+- `backend/app/services/pinescript_service.py` — **New** (310 lines) — Full PineScript v5 code generator
+
+**Files created:**
+- `backend/app/api/routes/pinescript.py` — **New** — `GET /pinescript/strategy/{id}`, `POST /pinescript/generate`
+
+**Files modified:**
+- `backend/app/main.py` — Registered pinescript router
+
+**Capabilities:**
+- Supports 8 indicators: RSI, SMA, EMA, MACD, Bollinger Bands, ATR, Stochastic, ADX, Donchian
+- Maps all 18 condition types to PineScript expressions (rsi_above, ma_cross_above, macd_cross_above, price_breakout_above, etc.)
+- Auto-generates indicator declarations referenced by rules but not in the indicators list
+- Renders entry/exit logic with `strategy.entry()` / `strategy.close()`
+- Stop loss + take profit via `strategy.exit()` with profit/loss in ticks
+- Visual plots for indicators on the chart
+- Output is copy-paste ready into TradingView
+
+### 3. Strategy Builder UI (React Flow Drag-Drop)
+**Files modified:**
+- `frontend/package.json` — Added `reactflow@11.11.4`
+- `frontend/components/Layout.tsx` — Added "Strategy Builder" nav item with Layers icon
+
+**Files created:**
+- `frontend/pages/dashboard/builder.tsx` — **New** (680 lines) — Full React Flow visual strategy editor
+
+**Features:**
+- **5 node types**: Indicator (configurable RSI/SMA/EMA/MACD/etc), Condition (18 condition types), Entry Point, Exit Point, Risk Management (SL/TP/Risk%)
+- Drag nodes from the "Add Node" panel onto the canvas
+- Connect nodes with animated edges to define flow
+- Each node has inline editing (click settings icon)
+- Top bar: strategy name, asset selector, timeframe selector, LONG/SHORT toggle
+- **Generate PineScript** button — calls `/pinescript/generate` and shows modal with copy-to-clipboard
+- **Save Strategy** — builds config from nodes and saves to `/strategies` API
+- Canvas has Controls, MiniMap, and Background grid
+
+### 4. Alert Management (Toggle Per Strategy)
+**Files modified:**
+- `backend/app/db/models.py` — Added `AlertPreference` model (alerts_enabled, push_enabled, email_enabled, in_app_enabled, min_confidence per strategy)
+- `backend/app/db/schemas.py` — Added `AlertPreferenceUpdate`, `AlertPreferenceOut` schemas
+- `backend/app/main.py` — Registered alert_preferences router
+
+**Files created:**
+- `backend/app/api/routes/alert_preferences.py` — **New** — Full CRUD:
+  - `GET /alert-preferences/` — List all preferences
+  - `GET /alert-preferences/strategy/{id}` — Get (auto-creates default)
+  - `PUT /alert-preferences/strategy/{id}` — Update fields
+  - `PATCH /alert-preferences/strategy/{id}/toggle` — Quick enable/disable
+
+**User flow:**
+- Each strategy gets an AlertPreference row (auto-created on first access)
+- User toggles: alerts on/off, push on/off, email on/off, in-app on/off
+- min_confidence filter: only alert when signal confidence >= threshold
+
+### 5. Firebase Cloud Messaging (Mobile Push Notifications)
+**Files created:**
+- `backend/app/services/fcm_service.py` — **New** — Firebase Admin SDK integration:
+  - Lazy initialization (no crash if not configured)
+  - `send_push_to_token()`, `send_push_to_tokens()` (multicast)
+  - `send_signal_alert()`, `send_trade_alert()` — pre-formatted trading notifications
+  - Android channel: `tradepilot_alerts`, high priority, sound
+  - APNs config: sound= default, badge=1
+
+- `backend/app/api/routes/devices.py` — **New** — Device token management:
+  - `POST /devices/register` — Register FCM token (upsert by token)
+  - `DELETE /devices/unregister` — Deactivate token
+  - `GET /devices/` — List active devices
+  - `POST /devices/test-push` — Send test notification
+
+- `mobile/src/notifications.ts` — **New** — Mobile push setup:
+  - `registerForPushNotifications()` — Request permissions, get Expo push token
+  - `registerDeviceToken()` — POST token to backend `/devices/register`
+  - `setupNotificationListeners()` — Handle received/tapped notifications
+  - Android channel config: `tradepilot_alerts`
+
+**Files modified:**
+- `backend/app/db/models.py` — Added `DeviceToken` model + User relationship
+- `backend/app/services/notification_service.py` — Added `FCMProvider` that auto-sends push on every in-app notification
+- `backend/app/core/config.py` — Added `FIREBASE_CREDENTIALS_PATH`, `FCM_ENABLED`
+- `backend/requirements.txt` — Added `firebase-admin==6.6.0`
+- `backend/.env.example` — Added `FIREBASE_CREDENTIALS_PATH`, `FCM_ENABLED`
+- `mobile/package.json` — Added `expo-notifications`
+- `mobile/app.json` — Added notification permissions, `googleServicesFile`
+- `mobile/src/api.ts` — Added `registerDevice()`, `testPush()` API methods
+- `mobile/App.tsx` — Integrated push registration + notification listeners on login
+
+### 6. PlayStore Submission Preparation
+**Files created:**
+- `mobile/.env.production` — Production API URL (`https://tradepilot-ai-api.onrender.com`)
+- `mobile/store-listing.md` — Full Play Store listing text (title, description, keywords, what's new)
+- `mobile/PLAYSTORE_SUBMISSION.md` — Step-by-step submission guide with prerequisites, Firebase setup, asset requirements, common issues
+
+**Files modified:**
+- `mobile/eas.json` — Added Android app-bundle build type, internal track submission config
+- `mobile/package.json` — Added build/submit scripts
+
+## Verification
+- **Frontend TypeScript**: `npx tsc --noEmit` — **clean** (0 errors)
+- **Mobile TypeScript**: `npx tsc --noEmit` — **clean** (0 errors)
+- **Backend Python syntax**: All 9 modified/created files pass `ast.parse()` — **clean**
+- **Backend deps install**: `pip install -r requirements.txt` — pydantic-core build fails on Python 3.14 (pre-existing env limitation, not from our changes)
+
+## Files Summary
+
+### New files (10):
+| File | Lines | Purpose |
+|------|-------|---------|
+| `backend/app/services/pinescript_service.py` | 310 | PineScript v5 code generator |
+| `backend/app/services/fcm_service.py` | 160 | Firebase Cloud Messaging push service |
+| `backend/app/api/routes/pinescript.py` | 30 | PineScript generation endpoints |
+| `backend/app/api/routes/alert_preferences.py` | 95 | Alert preference CRUD + toggle |
+| `backend/app/api/routes/devices.py` | 90 | FCM device token management |
+| `frontend/pages/dashboard/builder.tsx` | 680 | React Flow strategy builder UI |
+| `mobile/src/notifications.ts` | 80 | Push notification registration + listeners |
+| `mobile/.env.production` | 1 | Production API URL |
+| `mobile/store-listing.md` | 50 | Play Store listing text |
+| `mobile/PLAYSTORE_SUBMISSION.md` | 110 | Submission guide |
+
+### Modified files (14):
+| File | Changes |
+|------|---------|
+| `backend/app/core/config.py` | +ANTHROPIC_API_KEY/MODEL, +FIREBASE_CREDENTIALS_PATH/FCM_ENABLED |
+| `backend/app/db/models.py` | +AlertPreference, +DeviceToken models, +User.device_tokens relationship |
+| `backend/app/db/schemas.py` | +AlertPreferenceUpdate, +AlertPreferenceOut |
+| `backend/app/services/ai_strategy_service.py` | +_extract_with_claude(), updated analyze_trading_strategy() |
+| `backend/app/services/notification_service.py` | +FCMProvider, updated create_notification() |
+| `backend/app/main.py` | +3 router imports (pinescript, alert_preferences, devices) |
+| `backend/requirements.txt` | +anthropic, +firebase-admin |
+| `backend/.env.example` | +ANTHROPIC_*, +FCM_* vars |
+| `frontend/package.json` | +reactflow |
+| `frontend/components/Layout.tsx` | +Strategy Builder nav item, +Layers icon |
+| `mobile/package.json` | +expo-notifications |
+| `mobile/app.json` | +notification permissions, +googleServicesFile |
+| `mobile/src/api.ts` | +registerDevice, +testPush |
+| `mobile/eas.json` | +Android app-bundle, +internal track submit |
+
+## Environment Variables (new)
+| Variable | Where | Required |
+|----------|-------|----------|
+| ANTHROPIC_API_KEY | Backend | No (falls back to OpenAI/heuristic) |
+| ANTHROPIC_MODEL | Backend | No (default: claude-sonnet-4-20250514) |
+| FIREBASE_CREDENTIALS_PATH | Backend | No (FCM disabled without it) |
+| FCM_ENABLED | Backend | No (auto-detected from credentials path) |
+| EXPO_PUBLIC_API_URL | Mobile | Yes for production builds |
+
+## Next Steps
+- Replace placeholder icons (`assets/icon.png`, `assets/splash.png`, `assets/adaptive-icon.png`) with real 1024x1024 assets
+- Set up Firebase project + download `google-services.json` for mobile
+- Deploy backend with new env vars (ANTHROPIC_API_KEY, FIREBASE_CREDENTIALS_PATH)
+- Run `eas build -p android --profile production` + `eas submit -p android`
+- Test push notifications end-to-end (register device → fire signal → receive notification)
+
