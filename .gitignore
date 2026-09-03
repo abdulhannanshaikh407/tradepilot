@@ -25,6 +25,8 @@ node_modules/
 .next/
 out/
 npm-debug.log*
+.vercel/
+tsconfig.tsbuildinfo
 
 # OS / editor
 .DS_Store
