@@ -45,3 +45,5 @@ logs/
 coverage.xml
 htmlcov/
 signals.json
+.vercel
+.env*

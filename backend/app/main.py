@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.api.routes import (
     alert_preferences,
@@ -75,13 +75,31 @@ app = FastAPI(
     version=APP_VERSION,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# Dynamic CORS: allow configured origins + any *.vercel.app deployment
+@app.middleware("http")
+async def cors_middleware(request: Request, call_next):
+    from fastapi.responses import Response
+    origin = request.headers.get("origin", "")
+    allowed = CORS_ORIGINS[:]
+    # Auto-allow any Vercel deployment URL
+    if origin and ".vercel.app" in origin and origin not in allowed:
+        allowed.append(origin)
+    # Handle preflight
+    if request.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": origin if origin in allowed else allowed[0],
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Max-Age": "600",
+        }
+        return Response(status_code=204, headers=headers)
+    response = await call_next(request)
+    if origin in allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # ---- Rate limiting (Redis-backed, per-IP) ----
 RATE_LIMIT_WINDOW = 60  # seconds
