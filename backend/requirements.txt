@@ -1,32 +1,27 @@
-# ---- Web framework ----
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
-python-dotenv==1.0.1
-
-# ---- Data validation (v2, stable Windows wheels on Python 3.11) ----
-pydantic==2.10.4
-email-validator==2.2.0
-
-# ---- Database ----
 sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 alembic==1.14.0
-tzdata==2026.3
-
-# ---- Authentication ----
-PyJWT==2.10.1
-
-# ---- External services ----
-youtube-transcript-api==1.2.4
+pyjwt==2.10.1
+passlib[bcrypt]==1.7.4
+python-dotenv==1.0.1
+pydantic[email]==2.10.4
+httpx==0.28.1
+requests==2.32.3
 openai==1.57.1
 anthropic==0.40.0
 google-genai==1.14.0
+youtube-transcript-api==1.2.4
 firebase-admin==6.6.0
-httpx==0.28.1
 pysignalr==1.1.0
-
-# ---- Misc ----
-python-multipart==0.0.19
-
-# ---- Testing ----
+cryptography==44.0.0
+redis==5.2.1
+websockets==14.1
+websocket-client==1.7.0
 pytest==8.3.4
+pytest-asyncio==0.25.0
+aiofiles==24.1.0
+gunicorn==23.0.0
+sentry-sdk[fastapi]==2.19.2
+structlog==24.4.0

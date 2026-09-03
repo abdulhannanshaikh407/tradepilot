@@ -348,6 +348,59 @@ binance_market_data = BinanceMarketDataProvider()
 
 
 # --------------------------------------------------------------------------- #
+# Real-time market data provider (uses Binance WebSocket bar store)
+# --------------------------------------------------------------------------- #
+class RealtimeMarketDataProvider:
+    """Serves OHLCV bars from the real-time Binance WebSocket feed.
+
+    Falls back to the Binance REST provider (and then simulated) when
+    real-time bars are not yet available for a symbol/timeframe.
+    """
+
+    name = "realtime"
+
+    def __init__(self):
+        self._binance = BinanceMarketDataProvider()
+        self._sim = SimulatedMarketDataProvider()
+
+    def get_ohlcv(self, symbol: str, timeframe: str = "4H") -> List[dict]:
+        symbol = normalize_symbol(symbol)
+        if symbol not in ASSETS:
+            raise ValueError(f"Unsupported symbol: {symbol}")
+        if timeframe not in TIMEFRAMES:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        # Try real-time bar store first
+        try:
+            from app.services.realtime_feed import feed as realtime_feed
+            bars = realtime_feed.bar_store.get_bars(symbol, timeframe)
+            if bars and len(bars) >= 30:
+                return bars
+        except Exception:
+            pass
+
+        # Fall back to Binance REST API (real data, just not WebSocket-streamed)
+        if ASSETS.get(symbol, {}).get("market") == "crypto":
+            try:
+                return self._binance.get_ohlcv(symbol, timeframe)
+            except Exception:
+                pass
+
+        # Fall back to simulated (only for non-crypto or if everything fails)
+        return self._sim.get_ohlcv(symbol, timeframe)
+
+    def latest_quote(self, symbol: str, timeframe: str = "4H") -> dict:
+        bars = self.get_ohlcv(symbol, timeframe)
+        return bars[-1]
+
+    def assets(self) -> List[str]:
+        return list(ASSETS.keys())
+
+
+realtime_market_data = RealtimeMarketDataProvider()
+
+
+# --------------------------------------------------------------------------- #
 # Real market data provider (multi-source: Alpaca -> Binance -> yfinance)
 # --------------------------------------------------------------------------- #
 
@@ -448,20 +501,25 @@ class RealMarketDataProvider:
 
 real_market_data = RealMarketDataProvider()
 
-MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "simulated").strip().lower()
+MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "realtime").strip().lower()
 
 
 def get_provider() -> MarketDataProvider:
     """Return the active market-data provider.
 
-    ``MARKET_DATA_PROVIDER=binance`` enables live Binance data for crypto;
+    Default is ``realtime`` — uses Binance WebSocket for live crypto data,
+    falls back to Binance REST, then simulated.
+
+    ``MARKET_DATA_PROVIDER=binance`` uses Binance REST only (no WebSocket);
     ``MARKET_DATA_PROVIDER=real`` uses multi-source real data (yfinance fallback);
     ``MARKET_DATA_PROVIDER=biquote`` uses Biquote free API for forex/metals/crypto;
     ``MARKET_DATA_PROVIDER=finnhub`` uses Finnhub free API (needs FINNHUB_API_KEY);
     ``MARKET_DATA_PROVIDER=gold_forex`` uses multi-source gold+forex aggregator;
     ``MARKET_DATA_PROVIDER=mtsocket`` uses MTSocket free API (XAUUSD + forex);
-    anything else uses the deterministic simulated provider.
+    ``MARKET_DATA_PROVIDER=simulated`` uses deterministic fake data (demo only).
     """
+    if MARKET_DATA_PROVIDER == "realtime":
+        return realtime_market_data
     if MARKET_DATA_PROVIDER == "binance":
         return binance_market_data
     if MARKET_DATA_PROVIDER == "real":
@@ -471,7 +529,7 @@ def get_provider() -> MarketDataProvider:
             from app.services.biquote_provider import biquote_provider
             return biquote_provider
         except Exception:
-            return market_data
+            return realtime_market_data
     if MARKET_DATA_PROVIDER == "finnhub":
         try:
             from app.services.finnhub_provider import get_finnhub_provider
@@ -480,20 +538,22 @@ def get_provider() -> MarketDataProvider:
                 return p
         except Exception:
             pass
-        return market_data
+        return realtime_market_data
     if MARKET_DATA_PROVIDER == "gold_forex":
         try:
             from app.services.gold_forex_provider import gold_forex_provider
             return gold_forex_provider
         except Exception:
-            return market_data
+            return realtime_market_data
     if MARKET_DATA_PROVIDER == "mtsocket":
         try:
             from app.services.mtsocket_provider import mtsocket_provider
             return mtsocket_provider
         except Exception:
-            return market_data
-    return market_data
+            return realtime_market_data
+    if MARKET_DATA_PROVIDER == "simulated":
+        return market_data
+    return realtime_market_data
 
 
 live_quotes = LiveQuoteStore()

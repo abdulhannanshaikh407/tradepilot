@@ -11,14 +11,21 @@ Safety-first by default:
   - Hard caps: max concurrent positions, per-trade risk % of capital, optional
     per-day loss limit and a cooldown between re-entries.
   - Only LONG spot execution (SHORT requires margin and is rejected).
+
+Scaling for 25K users:
+  - Batch processing: configs are scanned in configurable batches.
+  - Market data caching: OHLCV fetched once per symbol/timeframe per cycle.
+  - Signal-only mode: users can receive signals without auto-execution.
 """
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.core.cache import cache
 from app.db import models
 from app.services.backtest_engine import RuleContext, evaluate_rule_group
 from app.services.broker import Broker, get_broker
@@ -41,9 +48,18 @@ SAFETY_LIMITS = {
     "max_position_size_percent": 5,      # Max 5% of account per trade
     "max_concurrent_positions": 3,       # Max 3 open at once
     "max_daily_loss_percent": 2,         # Stop if down 2% in a day
-    "max_leverage": 1.0,                 # No margin/leverage for MVP
+    "max_leverage": 1.0,                 # No margin/lever for MVP
     "cooldown_seconds": 60,              # Min 60s between orders
 }
+
+# Scaling config (from env)
+from app.core.config import AUTOTRADE_BATCH_SIZE, AUTOTRADE_MAX_CONCURRENT_USERS
+
+# Thread pool for parallel user scanning (bounded to prevent broker API rate limits)
+_executor = ThreadPoolExecutor(max_workers=AUTOTRADE_MAX_CONCURRENT_USERS, thread_name_prefix="autotrade")
+
+# OHLCV cache TTL in seconds
+_OHLCV_CACHE_TTL = 30
 
 
 def _now() -> datetime:
@@ -51,7 +67,13 @@ def _now() -> datetime:
 
 
 def _quote_price(symbol: str, timeframe: str) -> float:
-    return float(get_provider().get_ohlcv(symbol, timeframe)[-1]["close"])
+    cache_key = f"price:{symbol}:{timeframe}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return float(cached)
+    price = float(get_provider().get_ohlcv(symbol, timeframe)[-1]["close"])
+    cache.set(cache_key, price, ttl=_OHLCV_CACHE_TTL)
+    return price
 
 
 def _get_user_broker(db: Session, config: models.AutoTradeConfig, timeframe: str):
@@ -398,6 +420,20 @@ def _scan_config(db: Session, config: models.AutoTradeConfig) -> None:
         db.commit()
         return
 
+    # Signal-only mode: generate signal notification but skip execution
+    if config.mode == "signal_only":
+        create_notification(
+            db, config.user_id, "signal_alert", "New Signal",
+            f"{symbol} {suggestion['direction']} @ {suggestion.get('entry_price')} | "
+            f"SL: {suggestion.get('stop_loss')} | TP: {suggestion.get('take_profit')} | "
+            f"Confidence: {suggestion.get('confidence')}%",
+            strategy.user.email,
+        )
+        config.last_error = None
+        config.last_run_at = _now()
+        db.commit()
+        return
+
     result = _open_position(db, config, strategy, suggestion)
     if not result.get("skipped"):
         config.last_error = None
@@ -405,28 +441,81 @@ def _scan_config(db: Session, config: models.AutoTradeConfig) -> None:
     db.commit()
 
 
+def _scan_user_batch(user_configs: list[dict]) -> None:
+    """Scan a batch of configs for a single user (thread-safe)."""
+    from app.db.database import SessionLocal as _SessionLocal
+
+    db = _SessionLocal()
+    try:
+        for item in user_configs:
+            config_id = item["config_id"]
+            config = db.query(models.AutoTradeConfig).filter(
+                models.AutoTradeConfig.id == config_id
+            ).first()
+            if config and config.enabled:
+                _scan_config(db, config)
+    except Exception as exc:
+        logger.exception("user batch scan failed")
+    finally:
+        db.close()
+
+
 def run_once() -> dict:
-    """One full scan cycle across every enabled auto-trade config."""
+    """One full scan cycle across every enabled auto-trade config.
+
+    Scales for 25K users by:
+    1. Grouping configs by user
+    2. Processing users in parallel batches (bounded by thread pool)
+    3. Caching OHLCV data to avoid redundant provider calls
+    """
     from app.db.database import SessionLocal as _SessionLocal
 
     db = _SessionLocal()
     try:
         configs = (
-            db.query(models.AutoTradeConfig).filter(models.AutoTradeConfig.enabled.is_(True)).all()
+            db.query(models.AutoTradeConfig)
+            .filter(models.AutoTradeConfig.enabled.is_(True))
+            .all()
         )
         STATE["strategies_watched"] = len(configs)
+
+        if not configs:
+            STATE["last_run_at"] = datetime.now(timezone.utc)
+            STATE["last_error"] = None
+            return {"configs": 0, "last_run_at": STATE["last_run_at"]}
+
+        # Group configs by user for efficient processing
+        user_batches: dict[int, list[dict]] = {}
         for config in configs:
+            if config.user and config.user.is_active:
+                uid = config.user_id
+                if uid not in user_batches:
+                    user_batches[uid] = []
+                user_batches[uid].append({"config_id": config.id})
+
+        # Process users in parallel batches
+        batch_size = AUTOTRADE_BATCH_SIZE
+        user_items = list(user_batches.items())
+        futures = []
+
+        for i in range(0, len(user_items), batch_size):
+            batch = user_items[i:i + batch_size]
+            batch_data = []
+            for uid, configs_list in batch:
+                batch_data.extend(configs_list)
+            future = _executor.submit(_scan_user_batch, batch_data)
+            futures.append(future)
+
+        # Wait for all batches to complete
+        for future in as_completed(futures):
             try:
-                if config.user.is_active is False:
-                    continue
-                _scan_config(db, config)
-            except Exception as exc:  # one bad strategy must not stop the loop
-                logger.exception("autotrade scan failed for config %s", config.id)
-                config.last_error = str(exc)[:400]
-                db.commit()
+                future.result(timeout=300)  # 5 min timeout per batch
+            except Exception as exc:
+                logger.exception("autotrade batch failed: %s", exc)
+
         STATE["last_run_at"] = datetime.now(timezone.utc)
         STATE["last_error"] = None
-        return {"configs": len(configs), "last_run_at": STATE["last_run_at"]}
+        return {"configs": len(configs), "users": len(user_batches), "last_run_at": STATE["last_run_at"]}
     except Exception as exc:
         STATE["last_error"] = str(exc)
         logger.exception("autotrade cycle failed")

@@ -3,7 +3,7 @@ import logging
 import time
 from collections import defaultdict
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -35,7 +35,9 @@ from app.core.config import (
     ENVIRONMENT,
     JWT_SECRET,
     TRADINGVIEW_WEBHOOK_SECRET,
+    WS_HEARTBEAT_INTERVAL,
 )
+from app.core.cache import rate_limiter
 from app.db.database import Base, engine
 
 logging.basicConfig(
@@ -81,10 +83,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---- Rate limiting (simple in-memory, per-IP) ----
-_rate_limits: dict[str, list[float]] = defaultdict(list)
+# ---- Rate limiting (Redis-backed, per-IP) ----
 RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX = 300    # requests per window per IP (generous for production)
+RATE_LIMIT_MAX = 300    # requests per window per IP
 RATE_LIMIT_ENABLED = ENVIRONMENT != "test"
 
 
@@ -106,11 +107,9 @@ async def rate_limit_log_and_seed(request: Request, call_next):
     # Rate limit: skip health/docs endpoints and test mode
     client_ip = request.client.host if request.client else "unknown"
     if RATE_LIMIT_ENABLED and not path.startswith("/health") and not path.startswith("/docs") and not path.startswith("/openapi"):
-        now = time.time()
-        _rate_limits[client_ip] = [t for t in _rate_limits[client_ip] if now - t < RATE_LIMIT_WINDOW]
-        if len(_rate_limits[client_ip]) >= RATE_LIMIT_MAX:
+        rate_key = f"rl:{client_ip}"
+        if not rate_limiter.is_allowed(rate_key, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW):
             return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again later."})
-        _rate_limits[client_ip].append(now)
 
     start = time.perf_counter()
     response = await call_next(request)
@@ -173,18 +172,118 @@ seed.ensure_demo_user()
 _seeded = False
 
 
+# ---- WebSocket connection manager for real-time signal push ----
+class ConnectionManager:
+    """Manages WebSocket connections per user for real-time signal delivery."""
+
+    def __init__(self):
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: int):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, user_id: int):
+        if user_id in self.active_connections:
+            self.active_connections[user_id] = [
+                ws for ws in self.active_connections[user_id] if ws != websocket
+            ]
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def send_signal(self, user_id: int, signal_data: dict):
+        if user_id in self.active_connections:
+            dead = []
+            for ws in self.active_connections[user_id]:
+                try:
+                    await ws.send_json(signal_data)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                self.active_connections[user_id].remove(ws)
+
+    async def broadcast_signal(self, signal_data: dict):
+        for user_id in list(self.active_connections.keys()):
+            await self.send_signal(user_id, signal_data)
+
+    def get_connected_count(self) -> int:
+        return sum(len(conns) for conns in self.active_connections.values())
+
+
+ws_manager = ConnectionManager()
+
+
+@app.websocket("/ws/signals")
+async def websocket_signals(websocket: WebSocket):
+    """WebSocket endpoint for real-time signal streaming.
+
+    Clients connect with: ws://host/ws/signals?token=<jwt>
+    After auth, they receive signal events as JSON.
+    """
+    from app.core.security import decode_token
+    from app.db.database import SessionLocal
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+
+    payload = decode_token(token)
+    if not payload:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    user_id = payload.get("sub")
+    if not user_id:
+        await websocket.close(code=4001, reason="Invalid token payload")
+        return
+
+    await ws_manager.connect(websocket, user_id)
+    logger.info("WebSocket connected: user=%s", user_id)
+
+    try:
+        while True:
+            # Keep connection alive; client can send pings
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, user_id)
+        logger.info("WebSocket disconnected: user=%s", user_id)
+
+
 @app.on_event("startup")
 async def start_bg() -> None:
-    """Start the auto-trade monitor loop. Demo seeding deferred to first request."""
+    """Start the real-time feed, market scanner, and auto-trade engine."""
     import asyncio
 
     from app.core.config import AUTOTRADE_ENABLED, AUTOTRADE_INTERVAL
-    from app.services import autotrade
 
+    # --- Real-time price feed (Binance WebSocket) ---
+    try:
+        from app.services.realtime_feed import feed as realtime_feed
+        realtime_feed.start()
+        logger.info("Real-time Binance feed started")
+    except Exception:
+        logger.exception("Failed to start real-time feed")
+
+    # --- Market scanner (evaluates strategies on every price tick) ---
+    try:
+        from app.services.market_scanner import scanner as market_scanner
+        market_scanner.set_ws_callback(ws_manager.broadcast_signal)
+        market_scanner.start()
+        logger.info("Market scanner started — watching for live signals")
+    except Exception:
+        logger.exception("Failed to start market scanner")
+
+    # --- Auto-trade monitor loop (existing) ---
     if AUTOTRADE_ENABLED and AUTOTRADE_INTERVAL >= 30:
 
         async def monitor_loop() -> None:
             await asyncio.sleep(5)
+            from app.services import autotrade
             autotrade.STATE["running"] = True
             logger.info("Auto-trade monitor started (interval %ss)", AUTOTRADE_INTERVAL)
             try:
@@ -200,6 +299,9 @@ async def start_bg() -> None:
         asyncio.create_task(monitor_loop())
     else:
         logger.info("Auto-trade monitor disabled (AUTOTRADE_ENABLED=%s)", AUTOTRADE_ENABLED)
+
+    # Log system status
+    logger.info("TradePilot AI started | env=%s | real-time feed + scanner active", ENVIRONMENT)
 
 
 @app.get("/")

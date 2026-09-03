@@ -79,6 +79,18 @@ BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
 FCM_ENABLED = _get_bool("FCM_ENABLED", bool(FIREBASE_CREDENTIALS_PATH))
 
+# Redis (production caching, rate limiting, pub/sub)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_ENABLED = _get_bool("REDIS_ENABLED", ENVIRONMENT == "production")
+
+# WebSocket
+WS_HEARTBEAT_INTERVAL = int(os.getenv("WS_HEARTBEAT_INTERVAL", "30"))
+
+# Production scaling
+WORKER_COUNT = int(os.getenv("WORKER_COUNT", "1"))
+AUTOTRADE_BATCH_SIZE = int(os.getenv("AUTOTRADE_BATCH_SIZE", "50"))
+AUTOTRADE_MAX_CONCURRENT_USERS = int(os.getenv("AUTOTRADE_MAX_CONCURRENT_USERS", "10"))
+
 # ---- Free market data providers ----
 # Biquote (free, no API key — real-time forex, metals, crypto via SignalR)
 # No config needed, works out of the box.
