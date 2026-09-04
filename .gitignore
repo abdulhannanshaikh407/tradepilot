@@ -38,6 +38,10 @@ Thumbs.db
 *.log
 logs/
 
+# VAPID keys (generated at runtime, never commit)
+.vapid_public.key
+.vapid_private.key
+
 # Misc
 .pytest_cache/
 .mypy_cache/
