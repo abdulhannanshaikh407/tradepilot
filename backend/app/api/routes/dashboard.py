@@ -121,11 +121,11 @@ def tradingview_info(
     from app.core.config import TRADINGVIEW_WEBHOOK_SECRET
 
     return {
-        "global_secret": TRADINGVIEW_WEBHOOK_SECRET[:12] + "..." if TRADINGVIEW_WEBHOOK_SECRET else "",
+        "global_secret": TRADINGVIEW_WEBHOOK_SECRET[:8] + "..." if TRADINGVIEW_WEBHOOK_SECRET else "",
         "user_secret": user.webhook_secret or "",
         "webhook_path": "/webhook/tradingview",
         "example_payload": {
-            "secret": user.webhook_secret or TRADINGVIEW_WEBHOOK_SECRET,
+            "secret": "YOUR_WEBHOOK_SECRET_HERE",
             "symbol": "BTCUSD",
             "direction": "LONG",
             "price": 65000.0,

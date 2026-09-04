@@ -12,6 +12,7 @@ requests==2.32.3
 openai==1.57.1
 anthropic==0.40.0
 google-genai==1.14.0
+groq==0.13.0
 youtube-transcript-api==1.2.4
 yt-dlp>=2024.0.0
 firebase-admin==6.6.0

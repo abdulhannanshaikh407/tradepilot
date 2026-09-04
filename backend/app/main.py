@@ -76,7 +76,53 @@ app = FastAPI(
     title=APP_NAME,
     description="AI trading strategy research, backtesting and signal intelligence platform.",
     version=APP_VERSION,
+    openapi_tags=[
+        {"name": "auth", "description": "Signup, login, demo, token refresh"},
+        {"name": "market", "description": "Live market data, OHLCV, assets"},
+        {"name": "strategies", "description": "Trading strategies"},
+        {"name": "signals", "description": "Trading signals"},
+        {"name": "webhooks", "description": "TradingView webhook integration"},
+        {"name": "brokers", "description": "Broker connections (Alpaca, Binance, OANDA)"},
+        {"name": "push", "description": "Web push notifications"},
+    ],
 )
+
+# OpenAPI security scheme for Bearer token auth
+from fastapi.openapi.utils import get_openapi
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=APP_NAME,
+        version=APP_VERSION,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Paste your access token from /auth/login or /auth/demo",
+        }
+    }
+    # Apply Bearer auth to all protected endpoints (everything except public ones)
+    public_paths = {"/", "/health", "/docs", "/openapi.json", "/auth/login", "/auth/signup", "/auth/demo",
+                    "/webhook/tradingview", "/push/vapid-public-key", "/billing/plans", "/youtube/demo-strategies"}
+    for path, methods in openapi_schema.get("paths", {}).items():
+        # Normalize path: strip trailing slash for comparison
+        check_path = path.rstrip("/") or "/"
+        if check_path not in public_paths:
+            for method in methods:
+                if method in ("get", "post", "put", "delete", "patch"):
+                    methods[method]["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 # Dynamic CORS: allow configured origins + any *.vercel.app deployment
@@ -85,8 +131,9 @@ async def cors_middleware(request: Request, call_next):
     from fastapi.responses import Response
     origin = request.headers.get("origin", "")
     allowed = CORS_ORIGINS[:]
-    # Auto-allow any Vercel deployment URL
-    if origin and ".vercel.app" in origin and origin not in allowed:
+    # Strict CORS: only allow exact Vercel deployment URL
+    VERCEL_ORIGINS = {"https://tradepilot-psi-pearl.vercel.app"}
+    if origin in VERCEL_ORIGINS and origin not in allowed:
         allowed.append(origin)
     # Handle preflight
     if request.method == "OPTIONS":
