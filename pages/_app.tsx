@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import type { AppProps } from "next/app";
 import { useRouter } from "next/router";
 
@@ -59,6 +59,12 @@ function AuthenticatedApp({ Component, pageProps }: AppProps) {
 }
 
 function App(props: AppProps) {
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
   return (
     <AuthProvider>
       <ToastProvider>

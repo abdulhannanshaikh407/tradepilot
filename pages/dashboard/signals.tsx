@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import Head from "next/head";
-import { Radio, X } from "lucide-react";
+import { Radio, Wifi, WifiOff, X } from "lucide-react";
 
 import DashboardPage from "components/DashboardPage";
 import { Button, Card, DirectionBadge, EmptyState, Modal, Skeleton, SourceBadge, StatusBadge, useToast } from "components/ui";
 import { api, formatNumber, timeAgo } from "lib/api";
+import { useSignalWebSocket } from "lib/useSignalWebSocket";
 import type { Signal } from "lib/types";
 
 const STATUSES = ["ALL", "PENDING", "ACTIVE", "CLOSED", "CANCELLED"];
@@ -28,6 +29,17 @@ export default function Signals() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleNewSignal = useCallback((signal: Signal) => {
+    setSignals((prev) => {
+      if (!prev) return [signal];
+      if (prev.some((s) => s.id === signal.id)) return prev;
+      return [signal, ...prev];
+    });
+    toast(`New ${signal.direction} signal: ${signal.symbol} @ ${signal.entry_price}`, "success");
+  }, [toast]);
+
+  const { connected } = useSignalWebSocket(handleNewSignal);
 
   const setSignalStatus = async (sig: Signal, newStatus: string) => {
     setUpdating(true);
@@ -63,11 +75,24 @@ export default function Signals() {
         <title>Signals — TradePilot AI</title>
       </Head>
 
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-white">Signal Terminal</h1>
-        <p className="text-xs text-slate-500">
-          Paper-trading signals from strategies and TradingView alerts. Never financial advice.
-        </p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-white">Signal Terminal</h1>
+          <p className="text-xs text-slate-500">
+            Paper-trading signals from strategies and TradingView alerts. Never financial advice.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {connected ? (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <Wifi className="h-3 w-3" /> Live
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs text-slate-500">
+              <WifiOff className="h-3 w-3" /> Offline
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">

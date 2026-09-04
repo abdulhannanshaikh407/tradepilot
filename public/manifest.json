@@ -1,0 +1,16 @@
+{
+  "name": "TradePilot AI",
+  "short_name": "TradePilot",
+  "description": "AI trading strategy research, backtesting and signal intelligence platform.",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0B1120",
+  "theme_color": "#10B981",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -21,6 +21,7 @@ from app.api.routes import (
     notifications,
     performance,
     pinescript,
+    push,
     settings,
     signals,
     strategies,
@@ -179,6 +180,7 @@ app.include_router(pinescript.router)
 app.include_router(alert_preferences.router)
 app.include_router(devices.router)
 app.include_router(brokers.router)
+app.include_router(push.router)
 
 # Create tables (dev convenience; production uses Alembic migrations).
 Base.metadata.create_all(bind=engine)
@@ -240,7 +242,7 @@ async def websocket_signals(websocket: WebSocket):
     Clients connect with: ws://host/ws/signals?token=<jwt>
     After auth, they receive signal events as JSON.
     """
-    from app.core.security import decode_token
+    from app.core.security import decode_access_token
     from app.db.database import SessionLocal
 
     token = websocket.query_params.get("token")
@@ -248,14 +250,9 @@ async def websocket_signals(websocket: WebSocket):
         await websocket.close(code=4001, reason="Missing token")
         return
 
-    payload = decode_token(token)
-    if not payload:
-        await websocket.close(code=4001, reason="Invalid token")
-        return
-
-    user_id = payload.get("sub")
+    user_id = decode_access_token(token)
     if not user_id:
-        await websocket.close(code=4001, reason="Invalid token payload")
+        await websocket.close(code=4001, reason="Invalid token")
         return
 
     await ws_manager.connect(websocket, user_id)

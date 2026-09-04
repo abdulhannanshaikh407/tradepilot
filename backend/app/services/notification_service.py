@@ -98,8 +98,23 @@ class EmailProvider:
         return False
 
 
+class WebPushProvider:
+    """Sends web push notifications to browser subscriptions."""
+    name = "web_push"
+
+    def send(self, title: str, message: str, user_email: str, db: Session = None, user_id: int = None) -> bool:
+        if db is None or user_id is None:
+            return False
+        try:
+            from app.api.routes.push import send_web_push_to_user
+            result = send_web_push_to_user(db, user_id, title, message)
+            return result.get("sent", 0) > 0
+        except Exception:
+            return False
+
+
 def get_providers() -> List:
-    return [TelegramProvider(), FCMProvider(), EmailProvider()]
+    return [TelegramProvider(), FCMProvider(), WebPushProvider(), EmailProvider()]
 
 
 def create_notification(
@@ -116,7 +131,7 @@ def create_notification(
 
     for provider in get_providers():
         try:
-            if provider.name == "fcm":
+            if provider.name in ("fcm", "web_push"):
                 provider.send(title, message, user_email, db=db, user_id=user_id)
             else:
                 provider.send(title, message, user_email)

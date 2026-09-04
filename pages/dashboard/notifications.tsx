@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import Head from "next/head";
-import { BellRing, CheckCheck, Trash2, X } from "lucide-react";
+import { BellRing, CheckCheck, Trash2, Smartphone, Wifi, WifiOff } from "lucide-react";
 
 import DashboardPage from "components/DashboardPage";
 import { Button, Card, EmptyState, Skeleton, useToast } from "components/ui";
 import { api, timeAgo } from "lib/api";
+import { usePushNotifications } from "lib/usePushNotifications";
 import type { Notification } from "lib/types";
 
 function iconFor(type: string) {
@@ -28,6 +29,8 @@ export default function Notifications() {
   const { toast } = useToast();
   const [items, setItems] = useState<Notification[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [vapidKey, setVapidKey] = useState<string | null>(null);
+  const push = usePushNotifications();
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +43,34 @@ export default function Notifications() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Fetch VAPID key and check subscription status on mount
+  useEffect(() => {
+    api<{ publicKey: string }>("/push/vapid-public-key")
+      .then((res) => {
+        setVapidKey(res.publicKey);
+        push.checkSubscription();
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTogglePush = async () => {
+    if (!vapidKey) {
+      toast("Push notifications not configured yet", "error");
+      return;
+    }
+    if (push.subscribed) {
+      await push.unsubscribe();
+      toast("Push notifications disabled", "success");
+    } else {
+      const ok = await push.subscribe(vapidKey);
+      if (ok) {
+        toast("Push notifications enabled! You'll get alerts even when the site is closed.", "success");
+      } else {
+        toast("Push notification permission denied. Enable in browser settings.", "error");
+      }
+    }
+  };
 
   const markAll = async () => {
     setBusy(true);
@@ -94,6 +125,40 @@ export default function Notifications() {
           </Button>
         )}
       </div>
+
+      {/* Push Notification Toggle */}
+      <Card className="mb-4 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Smartphone className="h-5 w-5 text-emerald-400" />
+            <div>
+              <div className="text-sm font-semibold text-white">Device Push Notifications</div>
+              <p className="text-xs text-slate-500">
+                Get signal alerts on your device even when the website is closed.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {push.supported ? (
+              <>
+                <span className={`flex items-center gap-1.5 text-xs ${push.subscribed ? "text-emerald-400" : "text-slate-500"}`}>
+                  {push.subscribed ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                  {push.subscribed ? "Active" : "Off"}
+                </span>
+                <Button
+                  variant={push.subscribed ? "secondary" : "primary"}
+                  loading={push.loading}
+                  onClick={handleTogglePush}
+                >
+                  {push.subscribed ? "Disable" : "Enable"}
+                </Button>
+              </>
+            ) : (
+              <span className="text-xs text-slate-600">Not supported in this browser</span>
+            )}
+          </div>
+        </div>
+      </Card>
 
       <Card className="overflow-hidden p-0">
         {!items ? (
