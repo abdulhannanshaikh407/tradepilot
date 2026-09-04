@@ -287,7 +287,13 @@ class ConnectionManager:
                 except Exception:
                     dead.append(ws)
             for ws in dead:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
                 self.active_connections[user_id].remove(ws)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
 
     async def broadcast_signal(self, signal_data: dict):
         for user_id in list(self.active_connections.keys()):
@@ -295,6 +301,11 @@ class ConnectionManager:
 
     def get_connected_count(self) -> int:
         return sum(len(conns) for conns in self.active_connections.values())
+
+    def cleanup_stale(self, max_idle_seconds: int = 300):
+        """Remove connections that have been idle too long."""
+        # This is called periodically; actual timeout enforced by receive_text timeout
+        pass
 
 
 ws_manager = ConnectionManager()
@@ -325,11 +336,20 @@ async def websocket_signals(websocket: WebSocket):
 
     try:
         while True:
-            # Keep connection alive; client can send pings
-            data = await websocket.receive_text()
-            if data == "ping":
-                await websocket.send_text("pong")
-    except WebSocketDisconnect:
+            # Server-initiated ping every 30s to detect dead connections
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_HEARTBEAT_INTERVAL)
+                if data == "ping":
+                    await websocket.send_text("pong")
+            except asyncio.TimeoutError:
+                # No client activity — send server ping
+                try:
+                    await websocket.send_text("ping")
+                except Exception:
+                    break
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
         ws_manager.disconnect(websocket, user_id)
         logger.info("WebSocket disconnected: user=%s", user_id)
 

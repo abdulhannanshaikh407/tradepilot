@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -429,3 +430,13 @@ class RealTrade(Base):
     opened_at = Column(DateTime(timezone=True), server_default=func.now())
     closed_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, nullable=False, default="open")  # open, closed, cancelled
+
+
+# Composite indexes for hot query paths
+Index("ix_signals_user_created", Signal.user_id, Signal.created_at)
+Index("ix_signals_user_status", Signal.user_id, Signal.status)
+Index("ix_positions_user_status", Position.user_id, Position.status)
+Index("ix_trades_user_created", Trade.user_id, Trade.entered_at)
+Index("ix_backtests_user_created", Backtest.user_id, Backtest.created_at)
+Index("ix_notifications_user_created", Notification.user_id, Notification.created_at)
+Index("ix_autotradeconfigs_enabled", AutoTradeConfig.enabled)

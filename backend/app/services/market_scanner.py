@@ -201,8 +201,12 @@ class MarketScanner:
         db.commit()
         db.refresh(signal)
 
-        # Update dedup
-        self._signal_dedup[dedup_key] = time.time()
+        # Update dedup (prune entries older than 1 hour to prevent memory leak)
+        now = time.time()
+        self._signal_dedup[dedup_key] = now
+        if len(self._signal_dedup) > 1000:
+            cutoff = now - 3600
+            self._signal_dedup = {k: v for k, v in self._signal_dedup.items() if v > cutoff}
 
         logger.info(
             "SIGNAL FIRED: %s %s @ %.6f | Strategy: %s | R:R: %s | Confidence: %d%%",
