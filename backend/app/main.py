@@ -38,6 +38,8 @@ from app.core.config import (
     TRADINGVIEW_WEBHOOK_SECRET,
     WS_HEARTBEAT_INTERVAL,
 )
+from sqlalchemy import text as sql_text
+
 from app.core.cache import rate_limiter
 from app.db.database import Base, engine
 
@@ -184,6 +186,22 @@ app.include_router(push.router)
 
 # Create tables (dev convenience; production uses Alembic migrations).
 Base.metadata.create_all(bind=engine)
+
+# Ensure columns added after initial migration exist (safe for both SQLite and PostgreSQL)
+try:
+    with engine.connect() as _conn:
+        _dialect = engine.dialect.name
+        if _dialect == "sqlite":
+            _conn.execute(sql_text(
+                "ALTER TABLE broker_connections ADD COLUMN account_id VARCHAR"
+            ))
+        else:
+            _conn.execute(sql_text(
+                "ALTER TABLE broker_connections ADD COLUMN IF NOT EXISTS account_id VARCHAR"
+            ))
+        _conn.commit()
+except Exception:
+    pass  # Column already exists
 
 from app.db import seed  # noqa: E402
 
