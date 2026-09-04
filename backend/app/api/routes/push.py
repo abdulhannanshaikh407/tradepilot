@@ -33,7 +33,9 @@ def _get_or_generate_vapid_keys() -> tuple[str, str]:
     if _vapid_public_key and _vapid_private_key:
         return _vapid_public_key, _vapid_private_key
 
+    import base64
     import os
+
     pub_file = os.path.join(os.path.dirname(__file__), "../../../.vapid_public.key")
     priv_file = os.path.join(os.path.dirname(__file__), "../../../.vapid_private.key")
 
@@ -43,16 +45,37 @@ def _get_or_generate_vapid_keys() -> tuple[str, str]:
                 _vapid_public_key = f.read().strip()
             with open(priv_file) as f:
                 _vapid_private_key = f.read().strip()
-            return _vapid_public_key, _vapid_private_key
+            if _vapid_public_key and _vapid_private_key:
+                return _vapid_public_key, _vapid_private_key
     except Exception:
         pass
 
     try:
-        from py_vapid import Vapid
-        vapid = Vapid()
-        vapid.generate_keys()
-        _vapid_public_key = vapid.public_key.decode() if isinstance(vapid.public_key, bytes) else str(vapid.public_key)
-        _vapid_private_key = vapid.private_key.decode() if isinstance(vapid.private_key, bytes) else str(vapid.private_key)
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import serialization
+
+        # Generate EC P-256 key pair (required for Web Push VAPID)
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        public_key = private_key.public_key()
+
+        # Extract raw public key bytes (65 bytes uncompressed point)
+        pub_raw = public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint,
+        )
+        # Base64url encode (no padding) — this is the VAPID public key
+        _vapid_public_key = base64.urlsafe_b64encode(pub_raw).rstrip(b"=").decode("ascii")
+
+        # Extract raw private key bytes (32 bytes scalar)
+        priv_raw = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        # For pywebpush, we need the raw 32-byte scalar
+        priv_numbers = private_key.private_numbers()
+        priv_scalar = priv_numbers.private_value.to_bytes(32, byteorder="big")
+        _vapid_private_key = base64.urlsafe_b64encode(priv_scalar).rstrip(b"=").decode("ascii")
 
         # Persist for consistency across restarts
         try:
@@ -65,8 +88,8 @@ def _get_or_generate_vapid_keys() -> tuple[str, str]:
 
         return _vapid_public_key, _vapid_private_key
     except ImportError:
-        logger.warning("py-vapid not installed — run: pip install py-vapid")
-        raise RuntimeError("VAPID keys not available. Install py-vapid: pip install py-vapid")
+        logger.warning("cryptography not installed — VAPID keys unavailable")
+        raise RuntimeError("VAPID keys not available. Install: pip install cryptography")
 
 
 class PushSubscriptionRequest(BaseModel):
@@ -146,10 +169,6 @@ def unsubscribe_push(
 def send_web_push(subscription_data: dict, title: str, body: str, data: dict = None) -> bool:
     """Send a web push notification to a browser subscription."""
     try:
-        import httpx
-        from py_vapid import Vapid
-        from cryptography.hazmat.primitives import serialization
-
         _, priv_key_str = _get_or_generate_vapid_keys()
 
         endpoint = subscription_data.get("endpoint")
@@ -168,8 +187,7 @@ def send_web_push(subscription_data: dict, title: str, body: str, data: dict = N
             "tag": "tradepilot",
         })
 
-        # Send via httpx with VAPID auth
-        # Use webpush library if available, otherwise raw
+        # Send via pywebpush with VAPID signing
         try:
             from pywebpush import webpush
             subscription_info = {
