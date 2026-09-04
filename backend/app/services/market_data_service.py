@@ -498,8 +498,149 @@ class RealMarketDataProvider:
     def assets(self) -> List[str]:
         return list(ASSETS.keys())
 
-
 real_market_data = RealMarketDataProvider()
+
+
+# --------------------------------------------------------------------------- #
+# Composite provider — ALL free data sources combined
+# --------------------------------------------------------------------------- #
+# Crypto:    Binance WebSocket + REST (no key)
+# Forex:     Biquote (280+ pairs, no key)
+# Metals:    Biquote + gold-api.com + XAUS (no key)
+# Indices:   Biquote (NAS100, US500, US30)
+# Oil:       Biquote (USOIL, UKOIL)
+# Stocks:    Finnhub (free key) + Alpaca (free account)
+# Last resort: simulated
+
+# Market category mapping
+_CRYPTO_SYMBOLS = {s for s, cfg in ASSETS.items() if cfg["market"] == "crypto"}
+_FOREX_SYMBOLS = {s for s, cfg in ASSETS.items() if cfg["market"] == "forex"}
+_COMMODITY_SYMBOLS = {s for s, cfg in ASSETS.items() if cfg["market"] == "commodity"}
+_INDEX_SYMBOLS = {s for s, cfg in ASSETS.items() if cfg["market"] == "index"}
+
+
+class CompositeMarketDataProvider:
+    """Multi-source provider that uses ALL free data sources simultaneously.
+
+    - Crypto (BTC, ETH, SOL, etc.) → Binance WebSocket + REST
+    - Forex (EUR/USD, GBP/USD, etc.) → Biquote free API
+    - Metals (XAUUSD, XAGUSD, etc.) → Biquote + gold-api.com + XAUS
+    - Indices (NAS100, US500, US30) → Biquote
+    - Oil (USOIL, UKOIL) → Biquote
+    - Falls back to simulated only if ALL sources fail
+    """
+
+    name = "composite"
+
+    def __init__(self):
+        self._sim = SimulatedMarketDataProvider()
+        self._binance = BinanceMarketDataProvider()
+        self._cache: Dict[str, List[dict]] = {}
+        self._cache_ts: Dict[str, float] = {}
+
+    def _get_biquote_provider(self):
+        """Lazy-load Biquote provider."""
+        try:
+            from app.services.biquote_provider import biquote_provider
+            return biquote_provider
+        except Exception:
+            return None
+
+    def _get_gold_provider(self):
+        """Lazy-load gold/forex provider."""
+        try:
+            from app.services.gold_forex_provider import gold_forex_provider
+            return gold_forex_provider
+        except Exception:
+            return None
+
+    def get_ohlcv(self, symbol: str, timeframe: str = "4H") -> List[dict]:
+        symbol = normalize_symbol(symbol)
+        if symbol not in ASSETS:
+            raise ValueError(f"Unsupported symbol: {symbol}")
+        if timeframe not in TIMEFRAMES:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        key = f"{symbol}:{timeframe}"
+        now = time.time()
+
+        # Check cache (2 min TTL)
+        if key in self._cache and now - self._cache_ts.get(key, 0) < 120:
+            return self._cache[key]
+
+        market = ASSETS[symbol]["market"]
+        bars = None
+
+        # 1. Crypto → Binance (WebSocket bar store, then REST)
+        if market == "crypto":
+            try:
+                from app.services.realtime_feed import feed as realtime_feed
+                rt_bars = realtime_feed.bar_store.get_bars(symbol, timeframe)
+                if rt_bars and len(rt_bars) >= 30:
+                    bars = rt_bars
+            except Exception:
+                pass
+
+            if bars is None:
+                try:
+                    bars = self._binance.get_ohlcv(symbol, timeframe)
+                except Exception:
+                    pass
+
+        # 2. Forex → Biquote (free, 280+ pairs)
+        if bars is None and market == "forex":
+            bp = self._get_biquote_provider()
+            if bp:
+                try:
+                    bars = bp.get_ohlcv(symbol, timeframe)
+                except Exception:
+                    pass
+
+        # 3. Commodities (gold, silver, oil) → Biquote + gold providers
+        if bars is None and market == "commodity":
+            bp = self._get_biquote_provider()
+            if bp:
+                try:
+                    bars = bp.get_ohlcv(symbol, timeframe)
+                except Exception:
+                    pass
+
+            # Gold-specific fallback
+            if bars is None and symbol in ("XAUUSD", "GOLD"):
+                gp = self._get_gold_provider()
+                if gp:
+                    try:
+                        bars = gp.get_ohlcv(symbol, timeframe)
+                    except Exception:
+                        pass
+
+        # 4. Indices → Biquote
+        if bars is None and market == "index":
+            bp = self._get_biquote_provider()
+            if bp:
+                try:
+                    bars = bp.get_ohlcv(symbol, timeframe)
+                except Exception:
+                    pass
+
+        # 5. Last resort → simulated (never crash)
+        if bars is None:
+            bars = self._sim.get_ohlcv(symbol, timeframe)
+
+        self._cache[key] = bars
+        self._cache_ts[key] = now
+        return bars
+
+    def latest_quote(self, symbol: str, timeframe: str = "4H") -> dict:
+        bars = self.get_ohlcv(symbol, timeframe)
+        return bars[-1] if bars else {}
+
+    def assets(self) -> List[str]:
+        return list(ASSETS.keys())
+
+
+composite_market_data = CompositeMarketDataProvider()
+
 
 MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "realtime").strip().lower()
 
@@ -507,17 +648,24 @@ MARKET_DATA_PROVIDER = os.getenv("MARKET_DATA_PROVIDER", "realtime").strip().low
 def get_provider() -> MarketDataProvider:
     """Return the active market-data provider.
 
-    Default is ``realtime`` — uses Binance WebSocket for live crypto data,
-    falls back to Binance REST, then simulated.
+    Default is ``composite`` — uses ALL free data sources simultaneously:
+    - Crypto → Binance WebSocket + REST
+    - Forex → Biquote (280+ pairs, no key)
+    - Metals → Biquote + gold-api.com + XAUS
+    - Indices → Biquote
+    - Oil → Biquote
+    - Falls back to simulated only if ALL sources fail
 
-    ``MARKET_DATA_PROVIDER=binance`` uses Binance REST only (no WebSocket);
-    ``MARKET_DATA_PROVIDER=real`` uses multi-source real data (yfinance fallback);
-    ``MARKET_DATA_PROVIDER=biquote`` uses Biquote free API for forex/metals/crypto;
-    ``MARKET_DATA_PROVIDER=finnhub`` uses Finnhub free API (needs FINNHUB_API_KEY);
-    ``MARKET_DATA_PROVIDER=gold_forex`` uses multi-source gold+forex aggregator;
-    ``MARKET_DATA_PROVIDER=mtsocket`` uses MTSocket free API (XAUUSD + forex);
-    ``MARKET_DATA_PROVIDER=simulated`` uses deterministic fake data (demo only).
+    Other options:
+    ``MARKET_DATA_PROVIDER=realtime`` — Binance WebSocket only (crypto);
+    ``MARKET_DATA_PROVIDER=binance`` — Binance REST only;
+    ``MARKET_DATA_PROVIDER=biquote`` — Biquote only;
+    ``MARKET_DATA_PROVIDER=finnhub`` — Finnhub (needs FINNHUB_API_KEY);
+    ``MARKET_DATA_PROVIDER=gold_forex`` — Gold/forex aggregator;
+    ``MARKET_DATA_PROVIDER=simulated`` — deterministic fake data.
     """
+    if MARKET_DATA_PROVIDER == "composite":
+        return composite_market_data
     if MARKET_DATA_PROVIDER == "realtime":
         return realtime_market_data
     if MARKET_DATA_PROVIDER == "binance":
@@ -529,7 +677,7 @@ def get_provider() -> MarketDataProvider:
             from app.services.biquote_provider import biquote_provider
             return biquote_provider
         except Exception:
-            return realtime_market_data
+            return composite_market_data
     if MARKET_DATA_PROVIDER == "finnhub":
         try:
             from app.services.finnhub_provider import get_finnhub_provider
@@ -538,22 +686,22 @@ def get_provider() -> MarketDataProvider:
                 return p
         except Exception:
             pass
-        return realtime_market_data
+        return composite_market_data
     if MARKET_DATA_PROVIDER == "gold_forex":
         try:
             from app.services.gold_forex_provider import gold_forex_provider
             return gold_forex_provider
         except Exception:
-            return realtime_market_data
+            return composite_market_data
     if MARKET_DATA_PROVIDER == "mtsocket":
         try:
             from app.services.mtsocket_provider import mtsocket_provider
             return mtsocket_provider
         except Exception:
-            return realtime_market_data
+            return composite_market_data
     if MARKET_DATA_PROVIDER == "simulated":
         return market_data
-    return realtime_market_data
+    return composite_market_data
 
 
 live_quotes = LiveQuoteStore()

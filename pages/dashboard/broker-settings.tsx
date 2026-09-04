@@ -35,6 +35,7 @@ interface BrokerAccountData {
 const BROKERS = [
   { key: "alpaca", label: "Alpaca (Stocks)", accountTypes: ["paper", "live"] },
   { key: "binance", label: "Binance (Crypto)", accountTypes: ["live"] },
+  { key: "oanda", label: "OANDA (Forex & Metals)", accountTypes: ["practice", "live"] },
 ];
 
 export default function BrokerSettingsPage() {
@@ -44,6 +45,7 @@ export default function BrokerSettingsPage() {
   const [selectedBroker, setSelectedBroker] = useState("alpaca");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [accountType, setAccountType] = useState("paper");
   const [connecting, setConnecting] = useState(false);
   const [accountData, setAccountData] = useState<BrokerAccountData | null>(null);
@@ -79,13 +81,18 @@ export default function BrokerSettingsPage() {
 
     setConnecting(true);
     try {
+      const body: Record<string, string> = { broker: selectedBroker, api_key: apiKey, api_secret: apiSecret, account_type: accountType };
+      if (selectedBroker === "oanda" && accountId) {
+        body.account_id = accountId;
+      }
       await api("/brokers/connect", {
         method: "POST",
-        body: { broker: selectedBroker, api_key: apiKey, api_secret: apiSecret, account_type: accountType },
+        body,
       });
       toast(`Connected to ${selectedBroker.toUpperCase()}`, "success");
       setApiKey("");
       setApiSecret("");
+      setAccountId("");
       loadConnections();
     } catch (err) {
       toast(err instanceof ApiError ? err.detail : "Connection failed", "error");
@@ -213,6 +220,19 @@ export default function BrokerSettingsPage() {
                   />
                 </div>
               </div>
+
+              {selectedBroker === "oanda" && (
+                <div>
+                  <label className="label">OANDA Account ID</label>
+                  <input
+                    className="input font-mono"
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    placeholder="e.g. 101-001-12345678-001"
+                    required
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end">
                 <Button type="submit" loading={connecting}>

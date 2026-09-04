@@ -83,6 +83,7 @@ def _get_user_broker(db: Session, config: models.AutoTradeConfig, timeframe: str
         from app.services.broker_connector import BrokerConnector
         from app.services.alpaca_connector import AlpacaConnector
         from app.services.binance_connector import BinanceConnector
+        from app.services.oanda_connector import OandaConnector
 
         conn = db.query(models.BrokerConnection).filter(
             models.BrokerConnection.id == config.broker_connection_id,
@@ -95,6 +96,10 @@ def _get_user_broker(db: Session, config: models.AutoTradeConfig, timeframe: str
                 return AlpacaConnector(api_key, api_secret, conn.account_type)
             elif conn.broker_name == "binance":
                 return BinanceConnector(api_key, api_secret)
+            elif conn.broker_name == "oanda":
+                account_id = conn.account_id or ""
+                account_type = conn.account_type or "practice"
+                return OandaConnector(api_key, account_id, account_type)
     return get_broker(config.mode, timeframe)
 
 
