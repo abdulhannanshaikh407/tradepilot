@@ -92,7 +92,7 @@ SET_AND_FORGET_TEMPLATE = {
     "strategy_type": "supply_demand",
     "direction": "LONG",
     "indicators": [
-        {"name": "Price Action", "period": ""},
+        {"name": "Price Action", "period": 0},
         {"name": "EMA", "period": 200},
     ],
     "entry_rules": [

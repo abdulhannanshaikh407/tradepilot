@@ -28,5 +28,14 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _clear_rate_limiter():
+    """Clear the in-memory rate limiter before each test to prevent 429s."""
+    from app.core.cache import rate_limiter
+    rate_limiter._memory_store.clear()
+    yield
+    rate_limiter._memory_store.clear()
+
+
 def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}

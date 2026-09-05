@@ -65,7 +65,7 @@ DEMO_STRATEGIES: List[dict] = [
         "strategy_type": "supply_demand",
         "direction": DIRECTION_LONG,
         "indicators": [
-            {"name": "Price Action", "period": ""},
+            {"name": "Price Action", "period": 0},
             {"name": "EMA", "period": 200},
         ],
         "entry_rules": [
@@ -655,11 +655,11 @@ def _extract_heuristic(transcript: str) -> Dict[str, Any]:
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "crossover" in lower or "golden cross" in lower or "crosses above" in lower or "50 day" in lower or "50 sma" in lower:
-        raw = dict(DEMO_STRATEGIES[1])
+        raw = dict(DEMO_STRATEGIES[2])
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "rsi" in lower or "oversold" in lower:
-        raw = dict(DEMO_STRATEGIES[2])
+        raw = dict(DEMO_STRATEGIES[1])
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "macd" in lower:
