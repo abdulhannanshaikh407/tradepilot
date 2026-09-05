@@ -24,7 +24,8 @@ import {
 
 import { api, timeAgo, TOKEN_KEY } from "lib/api";
 import { useAuth } from "lib/auth";
-import type { Notification } from "lib/types";
+import { useSignalWebSocket } from "lib/useSignalWebSocket";
+import type { Notification, Signal } from "lib/types";
 import { useToast } from "./ui";
 
 const NAV = [
@@ -66,6 +67,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (user) loadNotifications();
   }, [user, loadNotifications]);
+
+  // Refresh notification count when a new signal arrives via WebSocket
+  const handleNewSignal = useCallback(() => {
+    if (user) loadNotifications();
+  }, [user, loadNotifications]);
+  useSignalWebSocket(handleNewSignal);
 
   useEffect(() => {
     setSidebarOpen(false);
