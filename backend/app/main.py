@@ -1,4 +1,5 @@
 # app/main.py
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -271,6 +272,10 @@ class ConnectionManager:
 
     def __init__(self):
         self.active_connections: dict[int, list[WebSocket]] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        self._loop = loop
 
     async def connect(self, websocket: WebSocket, user_id: int):
         await websocket.accept()
@@ -307,12 +312,38 @@ class ConnectionManager:
         for user_id in list(self.active_connections.keys()):
             await self.send_signal(user_id, signal_data)
 
+    def send_signal_sync(self, user_id: int, signal_data: dict):
+        """Thread-safe method for background threads to push signals to a specific user.
+
+        The market scanner runs in a background thread and cannot call async
+        methods directly. This method schedules the async send on the event loop.
+        """
+        if self._loop is None or self._loop.is_closed():
+            logger.warning("No event loop available for WebSocket push to user %d", user_id)
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.send_signal(user_id, signal_data), self._loop
+            )
+        except Exception as e:
+            logger.warning("WebSocket push failed for user %d: %s", user_id, e)
+
+    def broadcast_signal_sync(self, signal_data: dict):
+        """Thread-safe method for background threads to broadcast to all users."""
+        if self._loop is None or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast_signal(signal_data), self._loop
+            )
+        except Exception as e:
+            logger.warning("WebSocket broadcast failed: %s", e)
+
     def get_connected_count(self) -> int:
         return sum(len(conns) for conns in self.active_connections.values())
 
     def cleanup_stale(self, max_idle_seconds: int = 300):
         """Remove connections that have been idle too long."""
-        # This is called periodically; actual timeout enforced by receive_text timeout
         pass
 
 
@@ -365,9 +396,11 @@ async def websocket_signals(websocket: WebSocket):
 @app.on_event("startup")
 async def start_bg() -> None:
     """Start the real-time feed, market scanner, and auto-trade engine."""
-    import asyncio
-
     from app.core.config import AUTOTRADE_ENABLED, AUTOTRADE_INTERVAL
+
+    # --- Store event loop in ws_manager so background threads can push signals ---
+    ws_manager.set_loop(asyncio.get_running_loop())
+    logger.info("Event loop stored in WebSocket manager")
 
     # --- Real-time price feed (Binance WebSocket) ---
     try:
@@ -388,7 +421,8 @@ async def start_bg() -> None:
     # --- Market scanner (evaluates strategies on every price tick) ---
     try:
         from app.services.market_scanner import scanner as market_scanner
-        market_scanner.set_ws_callback(ws_manager.broadcast_signal)
+        # Use send_signal_sync so the background scanner thread can push to a specific user
+        market_scanner.set_ws_callback(ws_manager.send_signal_sync)
         market_scanner.start()
         logger.info("Market scanner started — watching for live signals")
     except Exception:
