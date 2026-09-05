@@ -377,6 +377,14 @@ async def start_bg() -> None:
     except Exception:
         logger.exception("Failed to start real-time feed")
 
+    # --- Forex/Commodity feed (Biquote polling for EUR/USD, GBP/USD, XAUUSD, etc.) ---
+    try:
+        from app.services.realtime_feed import forex_feed
+        forex_feed.start()
+        logger.info("Forex/Commodity feed started (Biquote polling)")
+    except Exception:
+        logger.exception("Failed to start forex feed")
+
     # --- Market scanner (evaluates strategies on every price tick) ---
     try:
         from app.services.market_scanner import scanner as market_scanner
@@ -385,6 +393,14 @@ async def start_bg() -> None:
         logger.info("Market scanner started — watching for live signals")
     except Exception:
         logger.exception("Failed to start market scanner")
+
+    # --- Register forex feed with market scanner ---
+    try:
+        from app.services.realtime_feed import forex_feed
+        forex_feed.on_price_update(market_scanner._on_price_update)
+        logger.info("Forex feed registered with market scanner")
+    except Exception:
+        logger.exception("Failed to register forex feed with scanner")
 
     # --- Auto-trade monitor loop (existing) ---
     if AUTOTRADE_ENABLED and AUTOTRADE_INTERVAL >= 30:

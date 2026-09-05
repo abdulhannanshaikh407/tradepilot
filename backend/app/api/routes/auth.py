@@ -57,6 +57,11 @@ def signup(payload: UserSignup, request: Request, db: Session = Depends(get_db))
             status=models.SubscriptionStatus.TRIAL.value,
         )
     )
+
+    # Seed Set & Forget strategies for forex+gold so the user gets live alerts
+    from app.db.seed import seed_default_strategies_for_user
+    seed_default_strategies_for_user(db, user)
+
     db.commit()
     db.refresh(user)
     return AuthResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
@@ -94,11 +99,14 @@ def refresh_token(user: models.User = Depends(get_current_user)):
 def demo_login(request: Request, db: Session = Depends(get_db)):
     """One-click demo. Creates (or reuses) a seeded demo user."""
     _check_auth_rate_limit(request)
-    from app.db.seed import ensure_demo_user
+    from app.db.seed import ensure_demo_user, seed_default_strategies_for_user
 
     user = ensure_demo_user()
     if user is None:
         raise HTTPException(status_code=500, detail="Could not prepare the demo workspace.")
+
+    # Ensure demo user also has Set & Forget strategies
+    seed_default_strategies_for_user(db, user)
 
     user.last_login = datetime.now(timezone.utc)
     db.commit()

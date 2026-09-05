@@ -69,6 +69,127 @@ def ensure_demo_user() -> models.User | None:
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Default strategies for ALL new users (Set & Forget — forex + gold)
+# ---------------------------------------------------------------------------
+
+SET_AND_FORGET_ASSETS = [
+    {"asset": "EUR/USD", "market": "forex"},
+    {"asset": "GBP/USD", "market": "forex"},
+    {"asset": "USD/JPY", "market": "forex"},
+    {"asset": "XAUUSD", "market": "commodity"},
+]
+
+SET_AND_FORGET_TEMPLATE = {
+    "name": "Set & Forget",
+    "description": (
+        "fxalexg's swing trading strategy using supply and demand zones. "
+        "Identify the HTF trend, mark Areas of Interest (AOIs), wait for a "
+        "lower-timeframe structure shift, then place limit orders with "
+        "pre-defined risk and let the trade play out."
+    ),
+    "timeframe": "4H",
+    "strategy_type": "supply_demand",
+    "direction": "LONG",
+    "indicators": [
+        {"name": "Price Action", "period": ""},
+        {"name": "EMA", "period": 200},
+    ],
+    "entry_rules": [
+        {"condition": "price_cross_above_ma", "params": {"period": 200, "ma": "ema"}}
+    ],
+    "confirmation_rules": [
+        {"condition": "price_above_ma", "params": {"period": 200, "ma": "ema"}}
+    ],
+    "exit_rules": [
+        {"condition": "price_below_ma", "params": {"period": 200, "ma": "ema"}}
+    ],
+    "stop_loss_type": "percent",
+    "stop_loss_value": 1.5,
+    "take_profit_type": "percent",
+    "take_profit_value": 6.0,
+    "risk_per_trade": 1.0,
+    "risk_reward": 4.0,
+    "confidence": 82,
+    "assumptions": [
+        "Core framework: Trend -> Area of Interest (AOI) -> Entry Trigger.",
+        "Higher timeframe (Daily/Weekly) sets the trend bias.",
+        "Entry via limit order at the proximal edge of a fresh supply/demand zone.",
+        "Stop loss placed beyond the distal edge of the zone.",
+        "First partial profit at 1R-1.5R, move stop to breakeven after structure confirms.",
+        "Leave runner to the next opposing zone on the same or higher timeframe.",
+    ],
+    "missing_information": [],
+    "source": "default",
+    "is_demo": False,
+    "is_active": True,
+}
+
+
+def seed_default_strategies_for_user(db: Session, user: models.User) -> None:
+    """Seed the Set & Forget strategy for forex+gold on all default assets.
+
+    Called during user registration so every user starts with live-alert-ready
+    strategies that the market scanner will evaluate automatically.
+    """
+    existing = (
+        db.query(models.Strategy)
+        .filter(
+            models.Strategy.user_id == user.id,
+            models.Strategy.name == "Set & Forget",
+            models.Strategy.source == "default",
+        )
+        .count()
+    )
+    if existing >= len(SET_AND_FORGET_ASSETS):
+        return  # Already seeded
+
+    for asset_info in SET_AND_FORGET_ASSETS:
+        # Check if this specific asset+user combo already exists
+        already = (
+            db.query(models.Strategy)
+            .filter(
+                models.Strategy.user_id == user.id,
+                models.Strategy.name == "Set & Forget",
+                models.Strategy.asset == asset_info["asset"],
+            )
+            .first()
+        )
+        if already:
+            continue
+
+        strategy = models.Strategy(
+            user_id=user.id,
+            name=SET_AND_FORGET_TEMPLATE["name"],
+            description=SET_AND_FORGET_TEMPLATE["description"],
+            asset=asset_info["asset"],
+            market=asset_info["market"],
+            timeframe=SET_AND_FORGET_TEMPLATE["timeframe"],
+            strategy_type=SET_AND_FORGET_TEMPLATE["strategy_type"],
+            direction=SET_AND_FORGET_TEMPLATE["direction"],
+            indicators=SET_AND_FORGET_TEMPLATE["indicators"],
+            entry_rules=SET_AND_FORGET_TEMPLATE["entry_rules"],
+            confirmation_rules=SET_AND_FORGET_TEMPLATE["confirmation_rules"],
+            exit_rules=SET_AND_FORGET_TEMPLATE["exit_rules"],
+            stop_loss_type=SET_AND_FORGET_TEMPLATE["stop_loss_type"],
+            stop_loss_value=SET_AND_FORGET_TEMPLATE["stop_loss_value"],
+            take_profit_type=SET_AND_FORGET_TEMPLATE["take_profit_type"],
+            take_profit_value=SET_AND_FORGET_TEMPLATE["take_profit_value"],
+            risk_per_trade=SET_AND_FORGET_TEMPLATE["risk_per_trade"],
+            risk_reward=SET_AND_FORGET_TEMPLATE["risk_reward"],
+            confidence=SET_AND_FORGET_TEMPLATE["confidence"],
+            assumptions=SET_AND_FORGET_TEMPLATE["assumptions"],
+            missing_information=SET_AND_FORGET_TEMPLATE["missing_information"],
+            source=SET_AND_FORGET_TEMPLATE["source"],
+            is_demo=False,
+            is_active=True,
+        )
+        db.add(strategy)
+
+    db.flush()
+    logger.info("Seeded Set & Forget strategies for user %d (%s)", user.id, user.email)
+
+
 def _seed_strategy(db: Session, user: models.User, demo: dict) -> models.Strategy:
     strategy = models.Strategy(
         user_id=user.id,
