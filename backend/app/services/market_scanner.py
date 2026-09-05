@@ -102,9 +102,9 @@ class MarketScanner:
             from app.services.realtime_feed import feed as realtime_feed
             bars = realtime_feed.bar_store.get_bars(symbol, timeframe)
 
-            if not bars or len(bars) < 200:
-                # Need at least 200 bars for EMA-200 to be valid
-                logger.debug("Not enough bars for %s %s: %d (need 200)", symbol, timeframe, len(bars) if bars else 0)
+            if not bars or len(bars) < 50:
+                # Need at least 50 bars for indicator calculation (EMA-200 less accurate but functional)
+                logger.debug("Not enough bars for %s %s: %d (need 50)", symbol, timeframe, len(bars) if bars else 0)
                 return
 
             rctx = RuleContext(bars)
@@ -286,7 +286,7 @@ class MarketScanner:
             for strategy in strategies:
                 try:
                     bars = realtime_feed.bar_store.get_bars(strategy.asset, strategy.timeframe)
-                    if not bars or len(bars) < 200:
+                    if not bars or len(bars) < 50:
                         continue
 
                     rctx = RuleContext(bars)

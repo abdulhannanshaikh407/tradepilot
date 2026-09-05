@@ -469,7 +469,7 @@ class ForexCommodityFeed:
                         with httpx.Client(timeout=15) as client:
                             resp = client.get(
                                 f"https://biquote.io/api/{biquote_sym}/ohlc",
-                                params={"timeframe": tf, "limit": 300},
+                                params={"timeframe": tf, "limit": 200},
                                 headers={"User-Agent": "TradePilot/1.0"},
                             )
                             if resp.status_code == 200:
