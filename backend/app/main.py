@@ -261,7 +261,15 @@ except Exception:
 
 from app.db import seed  # noqa: E402
 
-seed.ensure_demo_user()
+demo_user = seed.ensure_demo_user()
+if demo_user:
+    try:
+        from app.db.database import SessionLocal as _SL
+        _db = _SL()
+        seed.seed_default_strategies_for_user(_db, demo_user)
+        _db.close()
+    except Exception:
+        pass
 
 _seeded = False
 

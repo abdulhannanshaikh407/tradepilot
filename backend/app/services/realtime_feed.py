@@ -456,39 +456,57 @@ class ForexCommodityFeed:
             time.sleep(FOREX_POLL_INTERVAL)
 
     def _preload_forex_history(self):
-        """Fetch historical bars for forex/gold from Biquote."""
+        """Fetch historical bars for forex/gold from Biquote with retry."""
         logger.info("Preloading historical bars for forex/gold from Biquote...")
         loaded = 0
+        failed = 0
         for symbol in FOREX_COMMODITY_SYMBOLS:
             for tf in SUBSCRIBE_TIMEFRAMES:
-                try:
-                    biquote_sym = symbol.replace("/", "")
-                    with httpx.Client(timeout=15) as client:
-                        resp = client.get(
-                            f"https://biquote.io/api/{biquote_sym}/ohlc",
-                            params={"timeframe": tf, "limit": 300},
-                            headers={"User-Agent": "TradePilot/1.0"},
-                        )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            bars_data = data.get("bars") or data.get("data") or data if isinstance(data, list) else []
-                            bars = []
-                            for k in bars_data:
-                                if isinstance(k, dict):
-                                    bars.append({
-                                        "timestamp": k.get("timestamp") or k.get("time") or k.get("t", ""),
-                                        "open": float(k.get("open", k.get("o", 0))),
-                                        "high": float(k.get("high", k.get("h", 0))),
-                                        "low": float(k.get("low", k.get("l", 0))),
-                                        "close": float(k.get("close", k.get("c", 0))),
-                                        "volume": float(k.get("volume", k.get("v", 0))),
-                                    })
-                            if bars:
-                                self.bar_store.set_initial_bars(symbol, tf, bars)
-                                loaded += 1
-                except Exception as e:
-                    logger.debug("Failed to preload %s %s: %s", symbol, tf, e)
-        logger.info("Preloaded forex/gold bars for %d symbol/timeframe pairs", loaded)
+                success = False
+                for attempt in range(3):
+                    try:
+                        biquote_sym = symbol.replace("/", "")
+                        with httpx.Client(timeout=15) as client:
+                            resp = client.get(
+                                f"https://biquote.io/api/{biquote_sym}/ohlc",
+                                params={"timeframe": tf, "limit": 300},
+                                headers={"User-Agent": "TradePilot/1.0"},
+                            )
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                bars_data = data.get("bars") or data.get("data") or data if isinstance(data, list) else []
+                                bars = []
+                                for k in bars_data:
+                                    if isinstance(k, dict):
+                                        bars.append({
+                                            "timestamp": k.get("timestamp") or k.get("time") or k.get("t") or k.get("openTime", ""),
+                                            "open": float(k.get("open", k.get("o", 0))),
+                                            "high": float(k.get("high", k.get("h", 0))),
+                                            "low": float(k.get("low", k.get("l", 0))),
+                                            "close": float(k.get("close", k.get("c", 0))),
+                                            "volume": float(k.get("volume", k.get("v", k.get("tickVolume", 0)))),
+                                        })
+                                if bars:
+                                    self.bar_store.set_initial_bars(symbol, tf, bars)
+                                    loaded += 1
+                                    success = True
+                                    break
+                            elif resp.status_code == 429:
+                                logger.warning("Biquote rate limited for %s %s, retrying...", symbol, tf)
+                                time.sleep(2)
+                                continue
+                            else:
+                                logger.warning("Biquote returned %d for %s %s", resp.status_code, symbol, tf)
+                                break
+                    except Exception as e:
+                        if attempt < 2:
+                            logger.warning("Preload attempt %d failed for %s %s: %s", attempt + 1, symbol, tf, e)
+                            time.sleep(1)
+                        else:
+                            logger.error("Preload FAILED for %s %s after 3 attempts: %s", symbol, tf, e)
+                if not success:
+                    failed += 1
+        logger.info("Preloaded forex/gold bars for %d symbol/timeframe pairs (%d failed)", loaded, failed)
 
     def start(self):
         """Start the forex/commodity poll feed in a background thread."""

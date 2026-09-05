@@ -63,8 +63,12 @@ class MarketScanner:
     def _on_price_update(self, symbol: str, timeframe: str, bar: dict, price: float):
         """Called by RealtimeFeed on every price tick."""
         try:
+            # Determine the correct source based on symbol type
+            is_forex_or_gold = "/" in symbol or symbol in ("XAUUSD", "XAGUSD")
+            source = "biquote" if is_forex_or_gold else "binance_ws"
+
             # Update the live quote store so the rest of the system sees real prices
-            live_quotes.set(symbol, price, source="binance_ws", extra={
+            live_quotes.set(symbol, price, source=source, extra={
                 "timeframe": timeframe,
                 "high": bar.get("high"),
                 "low": bar.get("low"),
@@ -98,8 +102,9 @@ class MarketScanner:
             from app.services.realtime_feed import feed as realtime_feed
             bars = realtime_feed.bar_store.get_bars(symbol, timeframe)
 
-            if not bars or len(bars) < 30:
-                # Not enough bars for indicator calculation
+            if not bars or len(bars) < 200:
+                # Need at least 200 bars for EMA-200 to be valid
+                logger.debug("Not enough bars for %s %s: %d (need 200)", symbol, timeframe, len(bars) if bars else 0)
                 return
 
             rctx = RuleContext(bars)
@@ -137,6 +142,12 @@ class MarketScanner:
         exit_fired = evaluate_rule_group(rctx, i, exit_group)
 
         signal_fires = entry_fired and confirm_fired and not exit_fired
+
+        logger.debug(
+            "Scanner eval: %s %s user=%d entry=%s confirm=%s exit=%s -> signal=%s",
+            strategy.asset, strategy.timeframe, strategy.user_id,
+            entry_fired, confirm_fired, exit_fired, signal_fires,
+        )
 
         if not signal_fires:
             return
@@ -275,7 +286,7 @@ class MarketScanner:
             for strategy in strategies:
                 try:
                     bars = realtime_feed.bar_store.get_bars(strategy.asset, strategy.timeframe)
-                    if not bars or len(bars) < 30:
+                    if not bars or len(bars) < 200:
                         continue
 
                     rctx = RuleContext(bars)

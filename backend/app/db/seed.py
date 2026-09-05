@@ -186,7 +186,7 @@ def seed_default_strategies_for_user(db: Session, user: models.User) -> None:
         )
         db.add(strategy)
 
-    db.flush()
+    db.commit()
     logger.info("Seeded Set & Forget strategies for user %d (%s)", user.id, user.email)
 
 
