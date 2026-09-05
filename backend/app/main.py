@@ -167,10 +167,18 @@ async def rate_limit_log_and_seed(request: Request, call_next):
         try:
             import asyncio
             loop = asyncio.get_event_loop()
-            loop.create_task(asyncio.to_thread(seed.seed_demo_data))
-            logger.info("Demo data seeding started in background")
+            # Run seeding in a thread to avoid blocking the event loop
+            # Use a lock to prevent concurrent seeding
+            async def _safe_seed():
+                try:
+                    await asyncio.to_thread(seed.seed_demo_data)
+                    logger.info("Demo data seeded successfully")
+                except Exception as e:
+                    logger.warning("Deferred demo seeding failed (non-critical): %s", e)
+
+            loop.create_task(_safe_seed())
         except Exception:
-            logger.exception("Deferred demo seeding failed")
+            logger.exception("Deferred demo seeding failed to start")
 
     # Rate limit: skip health/docs endpoints and test mode
     client_ip = request.client.host if request.client else "unknown"

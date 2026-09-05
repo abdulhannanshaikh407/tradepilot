@@ -7,6 +7,7 @@ works out of the box with no external services or API keys. Runs idempotently.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -24,6 +25,9 @@ Base.metadata.create_all(bind=engine)
 
 DEMO_EMAIL = "demo@tradepilot.ai"
 RISK_AMOUNT = 100.0  # deterministic risk/unit for demo paper trades
+
+# Lock to prevent concurrent seeding operations that could lock SQLite
+_seeding_lock = threading.Lock()
 
 # Curated demo outcome profile (R multiples) so the clearly-simulated demo reads
 # as a realistic account: an early drawdown phase (visible losses), then recovery
@@ -57,6 +61,10 @@ def ensure_demo_user() -> models.User | None:
             db.refresh(user)
             logger.info("Created demo user.")
         return user
+    except Exception as e:
+        db.rollback()
+        logger.error("Failed to ensure demo user: %s", e)
+        return None
     finally:
         db.close()
 
@@ -314,42 +322,56 @@ def _refresh_demo_financials(db: Session, user: models.User) -> None:
 
 
 def seed_demo_data(force_refresh: bool = True) -> None:
-    db = SessionLocal()
+    """Seed demo data with lock to prevent SQLite contention."""
+    if not _seeding_lock.acquire(blocking=False):
+        logger.info("Demo seeding already in progress, skipping")
+        return
     try:
-        user = ensure_demo_user()
-        if force_refresh:
-            _refresh_demo_financials(db, user)
+        db = SessionLocal()
+        try:
+            user = ensure_demo_user()
+            if user is None:
+                logger.warning("Could not ensure demo user, skipping seed")
+                return
 
-        demo_list = ai_strategy_service.available_demo_strategies()
-        strategy_assets = {
-            "RSI Momentum Reversal": ["BTC/USD", "ETH/USD", "SOL/USD"],
-            "Golden Cross Trend": ["ETH/USD", "BTC/USD", "US500"],
-            "Momentum Breakout": ["NAS100", "US500", "GOLD"],
-            "MACD Trend Continuation": ["GOLD", "ETH/USD", "NAS100"],
-            "Bollinger Mean Reversion": ["EUR/USD", "GOLD", "BTC/USD"],
-        }
-        for demo in demo_list:
-            # Reuse an existing demo strategy (by name) or create it fresh.
-            strategy = (
-                db.query(models.Strategy)
-                .filter(
-                    models.Strategy.user_id == user.id,
-                    models.Strategy.is_demo.is_(True),
-                    models.Strategy.name == demo["strategy_name"],
+            if force_refresh:
+                _refresh_demo_financials(db, user)
+
+            demo_list = ai_strategy_service.available_demo_strategies()
+            strategy_assets = {
+                "Set & Forget": ["EUR/USD", "GBP/USD", "USD/JPY"],
+                "RSI Momentum Reversal": ["BTC/USD", "ETH/USD", "SOL/USD"],
+                "Golden Cross Trend": ["ETH/USD", "BTC/USD", "US500"],
+                "Momentum Breakout": ["NAS100", "US500", "GOLD"],
+                "MACD Trend Continuation": ["GOLD", "ETH/USD", "NAS100"],
+                "Bollinger Mean Reversion": ["EUR/USD", "GOLD", "BTC/USD"],
+            }
+            for demo in demo_list:
+                strategy = (
+                    db.query(models.Strategy)
+                    .filter(
+                        models.Strategy.user_id == user.id,
+                        models.Strategy.is_demo.is_(True),
+                        models.Strategy.name == demo["strategy_name"],
+                    )
+                    .first()
                 )
-                .first()
-            )
-            if strategy is None:
-                strategy = _seed_strategy(db, user, demo)
-            symbols = strategy_assets.get(demo["strategy_name"], [demo["asset"], "BTC/USD", "ETH/USD"])
-            backtests = []
-            for symbol in symbols:
-                backtests.append(_seed_backtest(db, user, strategy, symbol, strategy.timeframe))
-            _seed_trades_and_signals(db, user, strategy, backtests)
+                if strategy is None:
+                    strategy = _seed_strategy(db, user, demo)
+                symbols = strategy_assets.get(demo["strategy_name"], [demo["asset"], "BTC/USD", "ETH/USD"])
+                backtests = []
+                for symbol in symbols:
+                    backtests.append(_seed_backtest(db, user, strategy, symbol, strategy.timeframe))
+                _seed_trades_and_signals(db, user, strategy, backtests)
 
-        _seed_notifications(db, user)
-        _seed_webhook_events(db, user)
-        db.commit()
-        logger.info("Demo data seeded.")
+            _seed_notifications(db, user)
+            _seed_webhook_events(db, user)
+            db.commit()
+            logger.info("Demo data seeded.")
+        except Exception as e:
+            db.rollback()
+            logger.error("Demo seeding failed: %s", e)
+        finally:
+            db.close()
     finally:
-        db.close()
+        _seeding_lock.release()

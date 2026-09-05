@@ -31,6 +31,7 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  timeout?: number;
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
@@ -41,33 +42,47 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const response = await fetch(`${API_URL}${path}`, {
-    method: options.method || "GET",
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutMs = options.timeout || 60000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (response.status === 401 && typeof window !== "undefined") {
-    clearToken();
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal,
+    });
+
+    if (response.status === 401 && typeof window !== "undefined") {
+      clearToken();
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
-  }
 
-  if (!response.ok) {
-    let detail = `Request failed (${response.status})`;
-    try {
-      const data = await response.json();
-      if (typeof data.detail === "string") detail = data.detail;
-      else if (data.detail) detail = JSON.stringify(data.detail);
-    } catch {
-      /* ignore parse errors */
+    if (!response.ok) {
+      let detail = `Request failed (${response.status})`;
+      try {
+        const data = await response.json();
+        if (typeof data.detail === "string") detail = data.detail;
+        else if (data.detail) detail = JSON.stringify(data.detail);
+      } catch {
+        /* ignore parse errors */
+      }
+      throw new ApiError(response.status, detail);
     }
-    throw new ApiError(response.status, detail);
-  }
 
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiError(408, "Request timed out. The server may be slow — please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export const http = {

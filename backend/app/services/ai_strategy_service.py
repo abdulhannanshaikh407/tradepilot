@@ -54,6 +54,49 @@ ALLOWED_CONDITIONS = [
 # --------------------------------------------------------------------------- #
 DEMO_STRATEGIES: List[dict] = [
     {
+        "strategy_name": "Set & Forget",
+        "description": "fxalexg's swing trading strategy using supply and demand zones with a "
+        "set-and-forget execution model. Identify the HTF trend, mark Areas of Interest (AOIs), "
+        "wait for a lower-timeframe structure shift, then place limit orders with pre-defined "
+        "risk and let the trade play out.",
+        "asset": "EUR/USD",
+        "market": "forex",
+        "timeframe": "4H",
+        "strategy_type": "supply_demand",
+        "direction": DIRECTION_LONG,
+        "indicators": [
+            {"name": "Price Action", "period": ""},
+            {"name": "EMA", "period": 200},
+        ],
+        "entry_rules": [
+            {"condition": "price_cross_above_ma", "params": {"period": 200, "ma": "ema"}}
+        ],
+        "confirmation_rules": [
+            {"condition": "price_above_ma", "params": {"period": 200, "ma": "ema"}}
+        ],
+        "exit_rules": [
+            {"condition": "price_below_ma", "params": {"period": 200, "ma": "ema"}}
+        ],
+        "stop_loss_type": "percent",
+        "stop_loss_value": 1.5,
+        "take_profit_type": "percent",
+        "take_profit_value": 6.0,
+        "risk_per_trade": 1.0,
+        "risk_reward": 4.0,
+        "confidence": 82,
+        "assumptions": [
+            "Core framework: Trend -> Area of Interest (AOI) -> Entry Trigger.",
+            "Higher timeframe (Daily/Weekly) sets the trend bias.",
+            "Entry via limit order at the proximal edge of a fresh supply/demand zone.",
+            "Stop loss placed beyond the distal edge of the zone.",
+            "First partial profit at 1R-1.5R, move stop to breakeven after structure confirms.",
+            "Leave runner to the next opposing zone on the same or higher timeframe.",
+            "Max 2 open positions per market; correlated pairs count toward the same risk bucket.",
+            "Set-and-forget execution: no mid-trade adjustments once orders are placed.",
+        ],
+        "missing_information": [],
+    },
+    {
         "strategy_name": "RSI Momentum Reversal",
         "description": "AI-demol: mean-reversion entry after an oversold RSI reading, "
         "confirmed by price staying above the 200 EMA.",
@@ -603,8 +646,12 @@ def _extract_heuristic(transcript: str) -> Dict[str, Any]:
     asset = _detect_asset(lower)
     timeframe = _detect_timeframe(lower)
 
-    if "breakout" in lower or "break of the" in lower or "break the" in lower:
-        raw = dict(DEMO_STRATEGIES[2])
+    if "set and forget" in lower or "set & forget" in lower or "supply and demand" in lower or "supply & demand" in lower or "area of interest" in lower or "aoi" in lower:
+        raw = dict(DEMO_STRATEGIES[0])
+        raw["asset"] = asset
+        raw["timeframe"] = timeframe or raw["timeframe"]
+    elif "breakout" in lower or "break of the" in lower or "break the" in lower:
+        raw = dict(DEMO_STRATEGIES[3])
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "crossover" in lower or "golden cross" in lower or "crosses above" in lower or "50 day" in lower or "50 sma" in lower:
@@ -612,11 +659,11 @@ def _extract_heuristic(transcript: str) -> Dict[str, Any]:
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "rsi" in lower or "oversold" in lower:
-        raw = dict(DEMO_STRATEGIES[0])
+        raw = dict(DEMO_STRATEGIES[2])
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     elif "macd" in lower:
-        raw = dict(DEMO_STRATEGIES[3])
+        raw = dict(DEMO_STRATEGIES[4])
         raw["asset"] = asset
         raw["timeframe"] = timeframe or raw["timeframe"]
     else:

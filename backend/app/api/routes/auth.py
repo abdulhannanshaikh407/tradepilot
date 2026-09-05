@@ -99,16 +99,6 @@ def demo_login(request: Request, db: Session = Depends(get_db)):
     user = ensure_demo_user()
     if user is None:
         raise HTTPException(status_code=500, detail="Could not prepare the demo workspace.")
-    strategies = (
-        db.query(models.Strategy)
-        .filter(models.Strategy.user_id == user.id, models.Strategy.is_demo.is_(True))
-        .count()
-    )
-    if strategies == 0:
-        from app.db.seed import seed_demo_data
-        import threading
-
-        threading.Thread(target=seed_demo_data, daemon=True).start()
 
     user.last_login = datetime.now(timezone.utc)
     db.commit()

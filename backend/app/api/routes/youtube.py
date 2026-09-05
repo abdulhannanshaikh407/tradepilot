@@ -1,4 +1,5 @@
 # app/api/routes/youtube.py
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -11,9 +12,12 @@ from app.services.notification_service import create_notification
 from app.services.transcript_service import get_transcript, TranscriptError
 from app.services.youtube_service import extract_video_id, is_valid_youtube_url
 
+logger = logging.getLogger("tradepilot.youtube")
+
 router = APIRouter(prefix="/youtube", tags=["youtube"])
 
 TRANSCRIPT_HINTS = {
+    "Set & Forget": "set and forget",
     "RSI Momentum Reversal": "rsi",
     "Golden Cross Trend": "moving average",
     "Momentum Breakout": "breakout",
@@ -81,11 +85,22 @@ def analyze_youtube(
         transcript_data = get_transcript(video_id, payload.url, allow_demo_fallback=True, hint=hint)
     except TranscriptError as exc:
         raise HTTPException(status_code=422, detail=exc.message)
+    except Exception as exc:
+        logger.exception("Unexpected error fetching transcript for %s", video_id)
+        raise HTTPException(status_code=500, detail="Failed to fetch video transcript. Please try again.")
 
     transcript = transcript_data["transcript"]
     is_demo = transcript_data.get("is_demo", False)
 
-    extracted = ai_strategy_service.analyze_trading_strategy(transcript)
+    try:
+        extracted = ai_strategy_service.analyze_trading_strategy(transcript)
+    except Exception as exc:
+        logger.exception("Strategy extraction failed for %s", video_id)
+        raise HTTPException(status_code=500, detail="Failed to extract strategy from transcript.")
+
+    # If the transcript is a demo, mark the strategy as demo too
+    if is_demo:
+        extracted["is_demo"] = True
 
     strategy = _save_strategy(db, user, extracted, payload.url)
     db.add(

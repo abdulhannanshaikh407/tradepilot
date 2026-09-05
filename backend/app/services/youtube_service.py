@@ -14,6 +14,20 @@ YOUTUBE_PATTERNS = [
 ]
 
 SAMPLE_TRANSCRIPTS = {
+    "SETANDFORGET": (
+        "This is the only trading strategy you need to be profitable. It's a set and forget swing "
+        "trading approach based on supply and demand zones. First, identify the higher timeframe trend "
+        "on the daily and weekly charts. Only trade in the direction of that trend. Then mark your "
+        "areas of interest which are fresh untested supply and demand zones. Look for at least two "
+        "confluences at each zone like a swing level plus a fair value gap. Wait for price to sweep "
+        "liquidity into your zone and then look for a lower timeframe structure shift as your entry "
+        "trigger. Place a limit order at the proximal edge of the zone with your stop loss just "
+        "beyond the distal edge. Your take profit should be at the next opposing zone giving you at "
+        "least a one to four risk to reward ratio. Risk only one percent per trade. Take your first "
+        "partial profit at one R to one and a half R and move your stop to breakeven. Let the runner "
+        "continue to the next higher timeframe target. Set your orders and forget about them. Do not "
+        "adjust your trades once they are placed. This is a set and forget approach."
+    ),
     "RSI": (
         "In this video I'm going to break down my RSI momentum reversal strategy on Bitcoin. "
         "We trade the 4 hour chart. This strategy is long only when the market makes a strong "

@@ -31,6 +31,7 @@ const STEPS = [
 ];
 
 const SAMPLE_URLS = [
+  "https://www.youtube.com/watch?v=1dL3xmxA2e0",
   "https://www.youtube.com/watch?v=SJ-pziY3Xj0",
   "https://www.youtube.com/watch?v=U5cC6vqqHB0",
 ];
@@ -65,6 +66,7 @@ export default function Analyzer() {
         const result = await api<YouTubeAnalysis>("/youtube/analyze", {
           method: "POST",
           body: { url: targetUrl },
+          timeout: 90000,
         });
         clearInterval(timer);
         setStepIndex(STEPS.length - 1);
@@ -72,9 +74,16 @@ export default function Analyzer() {
         toast("Strategy extracted and saved", "success");
       } catch (err) {
         clearInterval(timer);
-        setError(
-          err instanceof ApiError ? err.detail : "Analysis failed. Check the URL and try again."
-        );
+        let message = "Analysis failed. Check the URL and try again.";
+        if (err instanceof ApiError) {
+          message = err.detail;
+          if (err.status === 408) {
+            message = "Request timed out. The video processing is taking too long — try a different video or use a demo.";
+          } else if (err.status === 422) {
+            message = err.detail || "Could not retrieve a transcript for this video. Try a demo video instead.";
+          }
+        }
+        setError(message);
       } finally {
         setLoading(false);
       }
