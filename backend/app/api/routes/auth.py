@@ -99,15 +99,32 @@ def refresh_token(user: models.User = Depends(get_current_user)):
 def demo_login(request: Request, db: Session = Depends(get_db)):
     """One-click demo. Creates (or reuses) a seeded demo user."""
     _check_auth_rate_limit(request)
-    from app.db.seed import ensure_demo_user, seed_default_strategies_for_user
+    import logging
+    _log = logging.getLogger("tradepilot.auth")
 
-    user = ensure_demo_user()
-    if user is None:
-        raise HTTPException(status_code=500, detail="Could not prepare the demo workspace.")
+    try:
+        from app.db.seed import ensure_demo_user, seed_default_strategies_for_user
 
-    # Ensure demo user also has Set & Forget strategies
-    seed_default_strategies_for_user(db, user)
+        demo_user = ensure_demo_user()
+        if demo_user is None:
+            _log.error("ensure_demo_user() returned None")
+            raise HTTPException(status_code=500, detail="Could not prepare the demo workspace.")
 
-    user.last_login = datetime.now(timezone.utc)
-    db.commit()
-    return AuthResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+        # Re-query the user inside THIS request's session so it's not detached
+        user = db.query(models.User).filter(models.User.email == demo_user.email).first()
+        if user is None:
+            _log.error("Demo user email %s not found in request session", demo_user.email)
+            raise HTTPException(status_code=500, detail="Could not prepare the demo workspace.")
+
+        # Ensure Set & Forget strategies are seeded (idempotent)
+        seed_default_strategies_for_user(db, user)
+
+        user.last_login = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(user)
+        return AuthResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.exception("Demo login failed: %s", e)
+        raise HTTPException(status_code=500, detail="Could not enter the demo. Please try again.")

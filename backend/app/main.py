@@ -267,6 +267,7 @@ if demo_user:
         from app.db.database import SessionLocal as _SL
         _db = _SL()
         seed.seed_default_strategies_for_user(_db, demo_user)
+        _db.commit()
         _db.close()
     except Exception:
         pass
