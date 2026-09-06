@@ -148,7 +148,20 @@ export default function Strategies() {
 
               <div className="mt-4 flex items-center justify-between text-[11px] text-slate-600">
                 <span className="line-clamp-1 pr-2">{s.description || "No description"}</span>
-                <span className="chip bg-accent-soft text-emerald-300">View →</span>
+                {s.source_url ? (
+                  <a
+                    href={s.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="chip border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                    title="View source video"
+                  >
+                    Source ↗
+                  </a>
+                ) : (
+                  <span className="chip bg-accent-soft text-emerald-300">View →</span>
+                )}
               </div>
             </Link>
           ))}

@@ -106,6 +106,7 @@ DEMO_STRATEGIES: List[dict] = [
             "No entries outside AOI, even if the pattern forms elsewhere.",
         ],
         "missing_information": [],
+        "source_url": "https://youtu.be/1dL3xmxA2e0",
     },
     {
         "strategy_name": "RSI Momentum Reversal",

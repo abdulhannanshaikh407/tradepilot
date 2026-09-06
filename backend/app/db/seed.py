@@ -132,6 +132,7 @@ SET_AND_FORGET_TEMPLATE = {
     ],
     "missing_information": [],
     "source": "default",
+    "source_url": "https://youtu.be/1dL3xmxA2e0",
     "is_demo": False,
     "is_active": True,
 }

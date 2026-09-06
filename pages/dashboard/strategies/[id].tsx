@@ -119,6 +119,19 @@ export default function StrategyDetail() {
           {strategy.description && (
             <p className="mt-2 max-w-2xl text-xs text-slate-500">{strategy.description}</p>
           )}
+          {strategy.source_url && (
+            <a
+              href={strategy.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 hover:underline"
+            >
+              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              View source video
+            </a>
+          )}
         </div>
         <div className="flex gap-2">
           <Button onClick={runBacktest} loading={running}>
