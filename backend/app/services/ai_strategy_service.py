@@ -55,10 +55,14 @@ ALLOWED_CONDITIONS = [
 DEMO_STRATEGIES: List[dict] = [
     {
         "strategy_name": "Set & Forget",
-        "description": "fxalexg's swing trading strategy using supply and demand zones with a "
-        "set-and-forget execution model. Identify the HTF trend, mark Areas of Interest (AOIs), "
-        "wait for a lower-timeframe structure shift, then place limit orders with pre-defined "
-        "risk and let the trade play out.",
+        "description": (
+            "fxalexg's swing trading strategy (source: https://youtu.be/1dL3xmxA2e0). "
+            "Core framework: Trend -> AOI -> Entry Trigger. "
+            "Identify HTF trend on Daily/Weekly, mark fresh supply/demand zones as AOIs, "
+            "wait for liquidity sweep into the AOI, then enter on a lower-timeframe "
+            "structure shift (HH/HL for longs, LL/LH for shorts) with pre-defined risk. "
+            "Set-and-forget: place the order, set stop and target, walk away."
+        ),
         "asset": "EUR/USD",
         "market": "forex",
         "timeframe": "4H",
@@ -83,16 +87,23 @@ DEMO_STRATEGIES: List[dict] = [
         "take_profit_value": 6.0,
         "risk_per_trade": 1.0,
         "risk_reward": 4.0,
-        "confidence": 82,
+        "confidence": 85,
         "assumptions": [
+            "Source: fxalexg - The Only Trading Strategy You Need To Be Profitable (https://youtu.be/1dL3xmxA2e0).",
             "Core framework: Trend -> Area of Interest (AOI) -> Entry Trigger.",
-            "Higher timeframe (Daily/Weekly) sets the trend bias.",
-            "Entry via limit order at the proximal edge of a fresh supply/demand zone.",
-            "Stop loss placed beyond the distal edge of the zone.",
-            "First partial profit at 1R-1.5R, move stop to breakeven after structure confirms.",
+            "Higher timeframe (Daily/Weekly) sets the trend bias using 200 EMA slope.",
+            "AOIs are fresh supply/demand zones with at least 2 confluences (swing level + FVG/order block).",
+            "Liquidity must be engineered first: look for a sweep of equal highs/lows into your AOI before the structure shift.",
+            "Longs: after sweep of lows inside demand AOI, wait for HH/HL on execution TF, enter on first bullish break-and-retest.",
+            "Shorts: after sweep of highs inside supply AOI, wait for LL/LH on execution TF, enter on first bearish break-and-retest.",
+            "Stop loss placed beyond the distal edge of the zone (logic-based, not comfort-based).",
+            "First partial profit at 1R-1.5R; move stop to breakeven only after new HH/LL confirms structure.",
             "Leave runner to the next opposing zone on the same or higher timeframe.",
+            "Time stop: if structure hasn't progressed after a set number of candles, flatten.",
             "Max 2 open positions per market; correlated pairs count toward the same risk bucket.",
-            "Set-and-forget execution: no mid-trade adjustments once orders are placed.",
+            "Set-and-forget execution: place order, set SL/TP, walk away. No mid-trade adjustments.",
+            "No counter-trend trades without a fresh HTF break and close.",
+            "No entries outside AOI, even if the pattern forms elsewhere.",
         ],
         "missing_information": [],
     },
