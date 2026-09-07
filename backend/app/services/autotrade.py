@@ -105,6 +105,12 @@ def _get_user_broker(db: Session, config: models.AutoTradeConfig, timeframe: str
 
 def _safety_check(db: Session, config: models.AutoTradeConfig, account_balance: float, signal_size: float) -> bool:
     """Refuse order if any safety limit is violated."""
+    # Check 0: User kill switch — blocks all live order execution
+    user = db.query(models.User).filter(models.User.id == config.user_id).first()
+    if user and user.kill_switch:
+        logger.info("Kill switch active for user %d — blocking order", config.user_id)
+        return False
+
     # Check 1: Position size cap (max 5% of account)
     if account_balance > 0 and (signal_size / account_balance) > SAFETY_LIMITS["max_position_size_percent"] / 100:
         return False

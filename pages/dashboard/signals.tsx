@@ -10,6 +10,46 @@ import type { Signal } from "lib/types";
 
 const STATUSES = ["ALL", "PENDING", "ACTIVE", "CLOSED", "CANCELLED"];
 
+const SIGNAL_STATE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  WATCHING: { bg: "bg-slate-500/15", text: "text-slate-400", dot: "bg-slate-400" },
+  FORMING: { bg: "bg-amber-500/15", text: "text-amber-400", dot: "bg-amber-400" },
+  CONFIRMED: { bg: "bg-sky-500/15", text: "text-sky-400", dot: "bg-sky-400" },
+  TRIGGERED: { bg: "bg-emerald-500/15", text: "text-emerald-400", dot: "bg-emerald-400" },
+  INVALIDATED: { bg: "bg-red-500/15", text: "text-red-400", dot: "bg-red-400" },
+  EXPIRED: { bg: "bg-slate-500/15", text: "text-slate-400", dot: "bg-slate-400" },
+  COMPLETED: { bg: "bg-emerald-500/15", text: "text-emerald-400", dot: "bg-emerald-400" },
+  CANCELLED: { bg: "bg-red-500/15", text: "text-red-400", dot: "bg-red-400" },
+};
+
+function SignalStateBadge({ state }: { state?: string | null }) {
+  if (!state) return <span className="text-xs text-slate-600">—</span>;
+  const colors = SIGNAL_STATE_COLORS[state] ?? SIGNAL_STATE_COLORS.WATCHING;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${colors.bg} ${colors.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${colors.dot}`} />
+      {state}
+    </span>
+  );
+}
+
+function QualityBar({ score }: { score?: number | null }) {
+  if (score == null) return <span className="text-xs text-slate-600">—</span>;
+  const pct = Math.round(score);
+  const color =
+    pct >= 80 ? "from-emerald-500 to-emerald-400" :
+    pct >= 60 ? "from-sky-500 to-sky-400" :
+    pct >= 40 ? "from-amber-500 to-amber-400" :
+    "from-red-500 to-red-400";
+  return (
+    <div className="min-w-[80px]">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-hover">
+        <div className={`h-full rounded-full bg-gradient-to-r ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <div className="number mt-0.5 text-[11px] text-slate-500">{pct}%</div>
+    </div>
+  );
+}
+
 export default function Signals() {
   const { toast } = useToast();
   const [signals, setSignals] = useState<Signal[] | null>(null);
@@ -127,6 +167,8 @@ export default function Signals() {
                   <th className="th">Entry</th>
                   <th className="th">Stop / Target</th>
                   <th className="th">R : R</th>
+                  <th className="th">State</th>
+                  <th className="th">Quality</th>
                   <th className="th">Status</th>
                   <th className="th">Source</th>
                   <th className="th">Reason</th>
@@ -144,6 +186,8 @@ export default function Signals() {
                       {s.take_profit != null ? formatNumber(s.take_profit, 2) : "—"}
                     </td>
                     <td className="td number">{s.risk_reward ?? "—"}</td>
+                    <td className="td"><SignalStateBadge state={s.signal_state} /></td>
+                    <td className="td"><QualityBar score={s.quality_score} /></td>
                     <td className="td"><StatusBadge status={s.status} /></td>
                     <td className="td"><SourceBadge source={s.source} /></td>
                     <td className="td"><span className="line-clamp-1 max-w-[220px] text-xs text-slate-500">{s.reason || "—"}</span></td>
@@ -193,6 +237,23 @@ export default function Signals() {
                 <div className="label">Risk : Reward</div>
                 <div className="number text-sm font-bold text-sky-400">{selected.risk_reward ?? "—"}</div>
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div>
+                <div className="label">Signal State</div>
+                <div className="mt-1.5"><SignalStateBadge state={selected.signal_state} /></div>
+              </div>
+              <div>
+                <div className="label">Quality Score</div>
+                <div className="mt-1.5"><QualityBar score={selected.quality_score} /></div>
+              </div>
+              {selected.invalidation_reason && (
+                <div>
+                  <div className="label">Invalidation Reason</div>
+                  <div className="text-xs text-red-400 mt-1.5">{selected.invalidation_reason}</div>
+                </div>
+              )}
             </div>
 
             <div>

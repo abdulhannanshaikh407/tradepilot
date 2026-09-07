@@ -201,7 +201,7 @@ class OandaConnector(BrokerConnector):
                 filled_at=filled_at,
             )
 
-    async def get_order_status(self, order_id: str) -> BrokerOrder:
+    async def get_order_status(self, order_id: str, symbol: str = "") -> BrokerOrder:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/{OANDA_API_VERSION}/accounts/{self.account_id}/trades/{order_id}",
@@ -219,7 +219,7 @@ class OandaConnector(BrokerConnector):
                 filled_price=float(data.get("price", 0)) if data.get("price") else None,
             )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str, symbol: str = "") -> bool:
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.put(

@@ -27,6 +27,7 @@ class UserOut(ORMModel):
     name: str
     plan: str
     is_demo: bool
+    kill_switch: bool = False
     created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
 
@@ -153,6 +154,9 @@ class SignalOut(ORMModel):
     confidence: Optional[int] = None
     reason: Optional[str] = None
     status: str
+    signal_state: str = "WATCHING"
+    invalidation_reason: Optional[str] = None
+    quality_score: Optional[float] = None
     source: str
     is_demo: bool
     created_at: Optional[datetime] = None

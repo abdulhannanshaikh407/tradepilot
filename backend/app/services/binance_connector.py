@@ -207,16 +207,16 @@ class BinanceConnector(BrokerConnector):
                 filled_at=datetime.now(timezone.utc),
             )
 
-    async def get_order_status(self, order_id: str) -> BrokerOrder:
-        """Get order status from Binance."""
+    async def get_order_status(self, order_id: str, symbol: str = "") -> BrokerOrder:
+        """Get order status from Binance. Requires symbol parameter."""
+        if not symbol:
+            raise ValueError("Binance requires symbol for order status lookup. Pass symbol parameter.")
+        binance_sym = _binance_symbol(symbol)
         async with httpx.AsyncClient() as client:
-            # Note: Binance requires symbol for order lookup, but our interface doesn't pass it.
-            # We'll use a placeholder symbol and rely on the order ID.
-            # In production, you'd need to track the symbol with the order.
             resp = await client.get(
                 f"{self.base_url}/api/v3/order",
                 headers=self._headers(),
-                params=self._sign_request({"orderId": order_id, "symbol": "BTCUSDT"}),
+                params=self._sign_request({"orderId": order_id, "symbol": binance_sym}),
                 timeout=10,
             )
             resp.raise_for_status()
@@ -225,7 +225,7 @@ class BinanceConnector(BrokerConnector):
             status_map = {"NEW": "pending", "FILLED": "filled", "CANCELED": "cancelled", "PARTIALLY_FILLED": "pending"}
             return BrokerOrder(
                 order_id=str(data.get("orderId", "")),
-                symbol=data.get("symbol", ""),
+                symbol=data.get("symbol", binance_sym),
                 quantity=float(data.get("origQty", 0)),
                 side=data.get("side", "").lower(),
                 price=float(data.get("price", 0)) if data.get("price") else None,
@@ -234,14 +234,17 @@ class BinanceConnector(BrokerConnector):
                 filled_at=datetime.now(timezone.utc),
             )
 
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel an open order on Binance."""
+    async def cancel_order(self, order_id: str, symbol: str = "") -> bool:
+        """Cancel an open order on Binance. Requires symbol parameter."""
+        if not symbol:
+            raise ValueError("Binance requires symbol for order cancellation. Pass symbol parameter.")
+        binance_sym = _binance_symbol(symbol)
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.delete(
                     f"{self.base_url}/api/v3/order",
                     headers=self._headers(),
-                    params=self._sign_request({"orderId": order_id, "symbol": "BTCUSDT"}),
+                    params=self._sign_request({"orderId": order_id, "symbol": binance_sym}),
                     timeout=10,
                 )
                 return resp.status_code == 200

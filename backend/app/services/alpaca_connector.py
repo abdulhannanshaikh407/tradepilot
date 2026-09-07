@@ -162,7 +162,7 @@ class AlpacaConnector(BrokerConnector):
                 filled_at=filled_at,
             )
 
-    async def get_order_status(self, order_id: str) -> BrokerOrder:
+    async def get_order_status(self, order_id: str, symbol: str = "") -> BrokerOrder:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/v2/orders/{order_id}",
@@ -182,7 +182,7 @@ class AlpacaConnector(BrokerConnector):
                 filled_at=datetime.fromisoformat(data["filled_at"].replace("Z", "+00:00")) if data.get("filled_at") else None,
             )
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: str, symbol: str = "") -> bool:
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.delete(

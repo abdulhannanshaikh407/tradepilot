@@ -90,13 +90,13 @@ class BrokerConnector(ABC):
         ...
 
     @abstractmethod
-    async def get_order_status(self, order_id: str) -> BrokerOrder:
-        """Fetch order status."""
+    async def get_order_status(self, order_id: str, symbol: str = "") -> BrokerOrder:
+        """Fetch order status. Symbol is optional but required for Binance."""
         ...
 
     @abstractmethod
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel order, return True if successful."""
+    async def cancel_order(self, order_id: str, symbol: str = "") -> bool:
+        """Cancel order, return True if successful. Symbol is optional but required for Binance."""
         ...
 
     @abstractmethod

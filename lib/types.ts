@@ -6,6 +6,7 @@ export interface User {
   name: string;
   plan: string;
   is_demo: boolean;
+  kill_switch?: boolean;
   created_at?: string | null;
   last_login?: string | null;
 }
@@ -74,6 +75,9 @@ export interface Signal {
   confidence?: number | null;
   reason?: string | null;
   status: string;
+  signal_state?: string;
+  invalidation_reason?: string | null;
+  quality_score?: number | null;
   source: string;
   is_demo: boolean;
   created_at?: string | null;

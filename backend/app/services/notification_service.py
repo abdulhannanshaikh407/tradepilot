@@ -91,11 +91,31 @@ class TelegramProvider:
 
 
 class EmailProvider:
-    """Placeholder for a future email provider (e.g. Resend/SendGrid)."""
+    """Sends email via Resend when RESEND_API_KEY is configured, otherwise stub."""
+
     name = "email"
 
     def send(self, title: str, message: str, user_email: str) -> bool:
-        return False
+        import os
+        api_key = os.getenv("RESEND_API_KEY")
+        if not api_key or not user_email:
+            return False
+        try:
+            import httpx
+            resp = httpx.post(
+                "https://api.resend.com/emails",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "from": os.getenv("EMAIL_FROM", "TradePilot <alerts@tradepilot.ai>"),
+                    "to": [user_email],
+                    "subject": title,
+                    "text": message,
+                },
+                timeout=10,
+            )
+            return resp.status_code == 200
+        except Exception:
+            return False
 
 
 class WebPushProvider:

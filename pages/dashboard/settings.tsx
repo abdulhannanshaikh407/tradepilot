@@ -18,11 +18,14 @@ export default function Settings() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [killSwitch, setKillSwitch] = useState(false);
+  const [togglingKill, setTogglingKill] = useState(false);
 
   useEffect(() => {
     if (user) {
       setName(user.name);
       setEmail(user.email);
+      setKillSwitch((user as any).kill_switch || false);
     }
     api<UserType>("/settings")
       .then((settings) => {
@@ -68,6 +71,20 @@ export default function Settings() {
       toast(err instanceof ApiError ? err.detail : "Password change failed", "error");
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const toggleKillSwitch = async () => {
+    setTogglingKill(true);
+    try {
+      const result = await api<{ kill_switch: boolean; message: string }>("/settings/kill-switch", { method: "POST" });
+      setKillSwitch(result.kill_switch);
+      await refreshUser();
+      toast(result.message, result.kill_switch ? "warning" : "success");
+    } catch (err) {
+      toast(err instanceof ApiError ? err.detail : "Kill switch toggle failed", "error");
+    } finally {
+      setTogglingKill(false);
     }
   };
 
@@ -155,6 +172,38 @@ export default function Settings() {
                 signals to this workspace. Manage the endpoint from the TradingView page.
               </p>
             </div>
+          </Card>
+
+          <Card title="Risk Management">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-white font-medium">Kill Switch</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  When enabled, blocks ALL live order execution across all strategies and brokers. 
+                  Paper trading is unaffected. Signals will still be generated but no live trades will be placed.
+                </p>
+              </div>
+              <button
+                onClick={toggleKillSwitch}
+                disabled={togglingKill}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  killSwitch ? "bg-red-500" : "bg-slate-600"
+                } ${togglingKill ? "opacity-50" : "cursor-pointer"}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    killSwitch ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+            {killSwitch && (
+              <div className="mt-3 p-2 rounded bg-red-500/10 border border-red-500/20">
+                <p className="text-[11px] text-red-400 font-medium">
+                  KILL SWITCH ACTIVE — All live trading is paused. No new live orders will be executed.
+                </p>
+              </div>
+            )}
           </Card>
         </div>
       )}

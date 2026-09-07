@@ -83,6 +83,23 @@ def _timeframe_ms(timeframe: str) -> int:
     return 3_600_000
 
 
+def _ensure_utc_iso(ts) -> str:
+    """Ensure a timestamp value is in UTC ISO format (YYYY-MM-DDTHH:MM:SS)."""
+    if isinstance(ts, (int, float)):
+        dt = datetime.fromtimestamp(ts if ts < 1e12 else ts / 1000, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S")
+    s = str(ts).strip()
+    if not s:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 class BarStore:
     """Thread-safe in-memory store of OHLCV bars per symbol/timeframe."""
 
@@ -135,6 +152,17 @@ class BarStore:
         if bars:
             return bars[-1]["close"]
         return None
+
+    def is_bar_fresh(self, symbol: str, timeframe: str, max_age_seconds: int = 300) -> bool:
+        """Return True if the latest bar for symbol/timeframe was updated within max_age_seconds."""
+        bars = self.get_bars(symbol, timeframe)
+        if not bars:
+            return False
+        try:
+            last_ts = datetime.fromisoformat(bars[-1]["timestamp"]).replace(tzinfo=timezone.utc)
+        except (ValueError, KeyError):
+            return False
+        return (datetime.now(timezone.utc) - last_ts).total_seconds() <= max_age_seconds
 
     def get_all_symbols(self) -> List[str]:
         """Get all symbols that have data."""
@@ -332,6 +360,8 @@ class ForexCommodityFeed:
         # Track current bar being built per symbol/timeframe
         self._current_bars: Dict[str, dict] = {}
         self._bar_open_times: Dict[str, float] = {}
+        # Dedup: last tick price per symbol to skip no-change updates
+        self._last_tick_prices: Dict[str, float] = {}
 
     def on_price_update(self, callback: Callable[[str, str, dict, float], None]):
         """Register a callback: callback(symbol, timeframe, bar, price)"""
@@ -378,6 +408,11 @@ class ForexCommodityFeed:
         """Update the current bar for a symbol/timeframe with a new tick."""
         now = time.time()
         bar_duration = self._timeframe_seconds(timeframe)
+        # Dedup: skip if price unchanged since last tick for this symbol
+        last_price = self._last_tick_prices.get(symbol)
+        if last_price is not None and price == last_price:
+            return self._current_bars.get(f"{symbol}:{timeframe}", {})
+        self._last_tick_prices[symbol] = price
         # Align to bar boundaries
         bar_start = (int(now) // bar_duration) * bar_duration
         bar_ts = datetime.fromtimestamp(bar_start, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -449,7 +484,8 @@ class ForexCommodityFeed:
                         # Update bars for all timeframes
                         for tf in SUBSCRIBE_TIMEFRAMES:
                             bar = self._update_bar(symbol, tf, price)
-                            self._notify_listeners(symbol, tf, bar, price)
+                            if bar:
+                                self._notify_listeners(symbol, tf, bar, price)
                 except Exception as e:
                     logger.debug("Error polling %s: %s", symbol, e)
 
@@ -478,8 +514,10 @@ class ForexCommodityFeed:
                                 bars = []
                                 for k in bars_data:
                                     if isinstance(k, dict):
+                                        ts = k.get("timestamp") or k.get("time") or k.get("t") or k.get("openTime", "")
+                                        ts = _ensure_utc_iso(ts)
                                         bars.append({
-                                            "timestamp": k.get("timestamp") or k.get("time") or k.get("t") or k.get("openTime", ""),
+                                            "timestamp": ts,
                                             "open": float(k.get("open", k.get("o", 0))),
                                             "high": float(k.get("high", k.get("h", 0))),
                                             "low": float(k.get("low", k.get("l", 0))),

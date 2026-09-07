@@ -39,12 +39,18 @@ class SignalDirection(str, enum.Enum):
 
 
 class SignalStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    ACTIVE = "ACTIVE"
+    WATCHING = "WATCHING"
+    FORMING = "FORMING"
+    CONFIRMED = "CONFIRMED"
+    TRIGGERED = "TRIGGERED"
     TARGET_HIT = "TARGET_HIT"
     STOP_HIT = "STOP_HIT"
+    INVALIDATED = "INVALIDATED"
     EXPIRED = "EXPIRED"
+    COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
 
 
 class TradeStatus(str, enum.Enum):
@@ -63,6 +69,7 @@ class User(Base):
     webhook_secret = Column(String, unique=True, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     is_demo = Column(Boolean, nullable=False, default=False)
+    kill_switch = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
@@ -168,6 +175,9 @@ class Signal(Base):
     confidence = Column(Integer, nullable=True)
     reason = Column(Text, nullable=True)
     status = Column(String, nullable=False, default=SignalStatus.PENDING.value)
+    signal_state = Column(String, nullable=False, default="WATCHING")
+    invalidation_reason = Column(Text, nullable=True)
+    quality_score = Column(Float, nullable=True)
     source = Column(String, nullable=False, default="manual")
     is_demo = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -440,3 +450,16 @@ Index("ix_trades_user_created", Trade.user_id, Trade.entered_at)
 Index("ix_backtests_user_created", Backtest.user_id, Backtest.created_at)
 Index("ix_notifications_user_created", Notification.user_id, Notification.created_at)
 Index("ix_autotradeconfigs_enabled", AutoTradeConfig.enabled)
+Index("ix_signals_user_state", Signal.user_id, Signal.signal_state)
+
+
+class SystemConfig(Base):
+    """App-wide configuration (kill switch, global settings)."""
+
+    __tablename__ = "system_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False, index=True)
+    value = Column(JSON, nullable=True)
+    description = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

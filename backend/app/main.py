@@ -140,8 +140,8 @@ async def cors_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         headers = {
             "Access-Control-Allow-Origin": origin if origin in allowed else allowed[0],
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Webhook-Secret",
             "Access-Control-Allow-Credentials": "true",
             "Access-Control-Max-Age": "600",
         }
@@ -259,6 +259,24 @@ try:
 except Exception:
     pass  # Column already exists
 
+# Ensure columns added for kill switch and signal state machine exist
+for _col_sql in [
+    "ALTER TABLE users ADD COLUMN kill_switch BOOLEAN NOT NULL DEFAULT 0",
+    "ALTER TABLE signals ADD COLUMN signal_state VARCHAR NOT NULL DEFAULT 'WATCHING'",
+    "ALTER TABLE signals ADD COLUMN invalidation_reason TEXT",
+    "ALTER TABLE signals ADD COLUMN quality_score FLOAT",
+]:
+    try:
+        with engine.connect() as _conn:
+            _dialect = engine.dialect.name
+            if _dialect == "sqlite":
+                _conn.execute(sql_text(_col_sql))
+            else:
+                _conn.execute(sql_text(_col_sql.replace("ALTER TABLE", "ALTER TABLE").replace(" ADD COLUMN ", " ADD COLUMN IF NOT EXISTS ")))
+            _conn.commit()
+    except Exception:
+        pass  # Column already exists
+
 from app.db import seed  # noqa: E402
 
 demo_user = seed.ensure_demo_user()
@@ -352,8 +370,24 @@ class ConnectionManager:
         return sum(len(conns) for conns in self.active_connections.values())
 
     def cleanup_stale(self, max_idle_seconds: int = 300):
-        """Remove connections that have been idle too long."""
-        pass
+        """Remove dead WebSocket connections by attempting a ping."""
+        stale_users = []
+        for user_id, conns in self.active_connections.items():
+            dead = []
+            for ws in conns:
+                try:
+                    asyncio.run_coroutine_threadsafe(ws.send_text("ping"), self._loop)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                try:
+                    conns.remove(ws)
+                except ValueError:
+                    pass
+            if not conns:
+                stale_users.append(user_id)
+        for uid in stale_users:
+            self.active_connections.pop(uid, None)
 
 
 ws_manager = ConnectionManager()

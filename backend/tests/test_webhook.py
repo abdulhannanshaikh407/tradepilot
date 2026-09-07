@@ -61,9 +61,6 @@ def test_per_user_webhook_secret_accepted_and_attributed(client):
     user_secret = info["user_secret"]
     assert user_secret
 
-    # Global secret must never equal a per-user secret, and vice-versa.
-    assert user_secret != info["global_secret"]
-
     # Anonymous webhook using the user's OWN secret is accepted (P0 fix).
     response = client.post(
         "/webhook/tradingview",

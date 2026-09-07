@@ -333,7 +333,6 @@ def run_backtest(
             entry_date = ts
 
             distance = abs(entry_price - stop_price)
-            risk_r = distance * min(size, 0)  # placeholder replaced below
             allocation = equity * (risk_percent / 100.0)
             if distance > 0:
                 size = allocation / distance

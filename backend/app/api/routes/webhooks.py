@@ -1,5 +1,5 @@
 # app/api/routes/webhooks.py
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
@@ -61,7 +61,7 @@ def _find_recent_dup_signal(
     side, entry price, timeframe and strategy) was created within the dedup
     window, the re-sent alert is treated as a duplicate and no new signal is
     created. Scoping by user_id keeps idempotency from leaking across users."""
-    cutoff = datetime.utcnow() - timedelta(seconds=DEDUP_WINDOW_SECONDS)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=DEDUP_WINDOW_SECONDS)
     return (
         db.query(models.Signal)
         .filter(
@@ -254,7 +254,7 @@ def test_webhook(
         "price": price,
         "timeframe": "4H",
         "strategy": "Test Alert",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "test": True,
     }
     result = _handle_webhook(db, body, valid_secret=True, user_id=user.id, mark_demo=False)

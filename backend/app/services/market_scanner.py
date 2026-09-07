@@ -205,8 +205,10 @@ class MarketScanner:
             risk_reward=rr,
             confidence=confidence,
             reason=reason_text,
-            status=models.SignalStatus.PENDING.value,
+            status=models.SignalStatus.CONFIRMED.value,
+            signal_state="CONFIRMED",
             source="realtime_scanner",
+            quality_score=confidence / 100.0,
         )
         db.add(signal)
         db.commit()

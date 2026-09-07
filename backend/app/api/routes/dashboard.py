@@ -152,10 +152,7 @@ def tradingview_info(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.core.config import TRADINGVIEW_WEBHOOK_SECRET
-
     return {
-        "global_secret": TRADINGVIEW_WEBHOOK_SECRET[:8] + "..." if TRADINGVIEW_WEBHOOK_SECRET else "",
         "user_secret": user.webhook_secret or "",
         "webhook_path": "/webhook/tradingview",
         "example_payload": {

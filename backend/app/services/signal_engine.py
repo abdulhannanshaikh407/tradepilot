@@ -63,7 +63,7 @@ def reasons_for_group(
             }
         )
     if reasons and logic == "any" and any(r["fired"] for r in reasons):
-        pass
+        pass  # "any" logic satisfied — reasons list already marks which conditions fired
     return reasons
 
 

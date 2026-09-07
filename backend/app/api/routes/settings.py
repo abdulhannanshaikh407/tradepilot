@@ -38,3 +38,24 @@ def update_settings(
     db.commit()
     db.refresh(user)
     return UserOut.model_validate(user)
+
+
+@router.post("/kill-switch")
+def toggle_kill_switch(
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle the user-level kill switch. When enabled, blocks all live order execution."""
+    user.kill_switch = not user.kill_switch
+    db.commit()
+    db.refresh(user)
+    state = "enabled" if user.kill_switch else "disabled"
+    return {"kill_switch": user.kill_switch, "message": f"Kill switch {state}. Live orders are {'blocked' if user.kill_switch else 'allowed'}."}
+
+
+@router.get("/kill-switch")
+def get_kill_switch_status(
+    user: models.User = Depends(get_current_user),
+):
+    """Check current kill switch status."""
+    return {"kill_switch": user.kill_switch}
