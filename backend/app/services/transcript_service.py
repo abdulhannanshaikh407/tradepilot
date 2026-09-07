@@ -2,15 +2,20 @@
 """Fetch real YouTube transcripts with graceful degradation.
 
 Uses multiple sources in order:
-  1. Invidious API (free, works from cloud servers) — fetched in parallel
-  2. youtube-transcript-api (works from residential IPs)
-  3. Simulated demo transcript (fallback)
+  1. yt-dlp auto-subtitles (works from most cloud servers)
+  2. Invidious API (free, works from cloud servers) — fetched in parallel
+  3. youtube-transcript-api (works from residential IPs)
+  4. Optional paid transcript API (if SUPADATA_API_KEY env var is set)
+  5. Simulated demo transcript (last resort fallback)
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from typing import Dict, Optional
 
@@ -44,7 +49,78 @@ INVIDIOUS_INSTANCES = [
     "https://invidious.privacyredirect.com",
     "https://invidious.fdn.fr",
     "https://vid.puffyan.us",
+    "https://invidious.lunar.icu",
+    "https://invidious.protokoll-11.de",
 ]
+
+
+def _fetch_via_ytdlp(video_id: str) -> Optional[str]:
+    """Source 1: Use yt-dlp to pull auto-generated captions.
+
+    yt-dlp --write-auto-sub --skip-download fetches .vtt subtitle files.
+    This tends to survive YouTube's datacenter IP blocking better than
+    youtube-transcript-api because it mimics a normal browser request.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cmd = [
+                "yt-dlp",
+                "--write-auto-sub",
+                "--sub-lang", "en",
+                "--sub-format", "vtt",
+                "--skip-download",
+                "--no-warnings",
+                "--quiet",
+                "-o", os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                f"https://www.youtube.com/watch?v={video_id}",
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                logger.debug("yt-dlp failed for %s: %s", video_id, result.stderr[:200])
+                return None
+
+            # Find the .vtt file
+            vtt_files = [f for f in os.listdir(tmpdir) if f.endswith(".vtt")]
+            if not vtt_files:
+                return None
+
+            vtt_path = os.path.join(tmpdir, vtt_files[0])
+            with open(vtt_path, "r", encoding="utf-8") as f:
+                vtt_content = f.read()
+
+            # Parse VTT: strip timestamps and formatting tags
+            lines = []
+            seen = set()
+            for line in vtt_content.split("\n"):
+                line = line.strip()
+                # Skip timestamps, empty lines, headers
+                if not line or line.startswith("WEBVTT") or line.startswith("Kind:") or line.startswith("Language:"):
+                    continue
+                if "-->" in line:
+                    continue
+                if re.match(r"^\d+$", line):
+                    continue
+                # Strip VTT formatting tags
+                clean = re.sub(r"<[^>]+>", "", line)
+                clean = re.sub(r"\{[^}]+\}", "", clean)
+                clean = clean.strip()
+                if clean and clean not in seen:
+                    seen.add(clean)
+                    lines.append(clean)
+
+            transcript = " ".join(lines)
+            if len(transcript) > 50:
+                logger.info("Transcript fetched via yt-dlp for %s", video_id)
+                return _clean_text(transcript)
+
+    except subprocess.TimeoutExpired:
+        logger.warning("yt-dlp timed out for video %s", video_id)
+    except Exception as exc:
+        logger.debug("yt-dlp error for %s: %s", video_id, exc)
+
+    return None
 
 
 def _fetch_single_invidious(instance: str, video_id: str) -> Optional[str]:
@@ -173,15 +249,59 @@ def _fetch_with_api(video_id: str) -> Optional[list]:
         return None
 
 
-def fetch_transcript(video_id: str, language_hint: Optional[str] = None) -> dict:
-    """Fetch a real transcript. Returns dict(transcript, language, is_demo=False)."""
+def _fetch_via_supadata(video_id: str) -> Optional[str]:
+    """Optional paid transcript API (SUPADATA_API_KEY). $2-5/mo, very reliable."""
+    api_key = os.environ.get("SUPADATA_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        resp = httpx.get(
+            f"https://api.supadata.ai/v1/youtube/transcript",
+            params={"videoId": video_id, "lang": "en"},
+            headers={"x-api-key": api_key},
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            text = data.get("transcript", "")
+            if not text and isinstance(data.get("content"), list):
+                text = " ".join(seg.get("text", "") for seg in data["content"])
+            if text and len(text) > 50:
+                logger.info("Transcript fetched via Supadata API for %s", video_id)
+                return _clean_text(text)
+    except Exception as exc:
+        logger.debug("Supadata API error for %s: %s", video_id, exc)
+    return None
 
-    # Source 1: Invidious API (works from cloud servers)
+
+def fetch_transcript(video_id: str, language_hint: Optional[str] = None) -> dict:
+    """Fetch a real transcript. Returns dict(transcript, language, is_demo=False, reason=...).
+
+    Fallback chain:
+      1. yt-dlp (best cloud compatibility)
+      2. Invidious (parallel, free)
+      3. youtube-transcript-api (residential IPs)
+      4. Supadata API (optional, gated by SUPADATA_API_KEY)
+      5. Raises TranscriptError if all real paths fail
+    """
+    reasons = []
+
+    # Source 1: yt-dlp (works from most cloud servers)
+    transcript_text = _fetch_via_ytdlp(video_id)
+    if transcript_text:
+        return {"transcript": transcript_text, "language": "en", "is_demo": False, "reason": ""}
+
+    reasons.append("yt-dlp: captions not available or download failed")
+
+    # Source 2: Invidious API (works from cloud servers)
     transcript_text = _fetch_via_invidious(video_id)
     if transcript_text:
-        return {"transcript": transcript_text, "language": "en", "is_demo": False}
+        return {"transcript": transcript_text, "language": "en", "is_demo": False, "reason": ""}
 
-    # Source 2: youtube-transcript-api (may work from residential IPs)
+    reasons.append("Invidious: all instances timed out or returned no captions")
+
+    # Source 3: youtube-transcript-api (may work from residential IPs)
     raw = _fetch_with_api(video_id)
     if raw:
         parts = []
@@ -191,7 +311,16 @@ def fetch_transcript(video_id: str, language_hint: Optional[str] = None) -> dict
                 parts.append(_clean_text(text))
         transcript = " ".join(parts)
         if transcript.strip():
-            return {"transcript": transcript, "language": "original", "is_demo": False}
+            return {"transcript": transcript, "language": "original", "is_demo": False, "reason": ""}
+
+    reasons.append("youtube-transcript-api: blocked or unavailable from this IP")
+
+    # Source 4: Supadata API (optional paid fallback)
+    transcript_text = _fetch_via_supadata(video_id)
+    if transcript_text:
+        return {"transcript": transcript_text, "language": "en", "is_demo": False, "reason": ""}
+
+    reasons.append("Supadata API: not configured or failed")
 
     raise TranscriptError(
         "Could not retrieve a transcript for this video.",
@@ -222,7 +351,7 @@ def get_transcript(
             metadata = {"video_title": "YouTube video"}
 
         try:
-            transcript_result = transcript_future.result(timeout=15)
+            transcript_result = transcript_future.result(timeout=30)
         except TranscriptError as exc:
             transcript_error = exc
         except Exception as exc:
@@ -232,6 +361,14 @@ def get_transcript(
         if not allow_demo_fallback:
             raise transcript_error or TranscriptError("Could not retrieve transcript.")
         demo = demo_transcript_for(video_id, hint)
+        # Build a user-friendly reason from the failure chain
+        fail_reason = "All transcript sources failed"
+        if transcript_error:
+            code = getattr(transcript_error, "code", "")
+            if code == "no_transcript":
+                fail_reason = "This video has no captions/subtitles available (neither manual nor auto-generated)"
+            else:
+                fail_reason = str(transcript_error.message) if hasattr(transcript_error, "message") else str(transcript_error)
         return {
             "transcript": demo["transcript"],
             "language": "simulated",
@@ -239,14 +376,16 @@ def get_transcript(
             "video_title": metadata.get("video_title", "Demo video"),
             "video_url": url,
             "video_id": video_id,
-            "message": "Real transcript unavailable — using a simulated demo transcript.",
+            "message": f"Real transcript unavailable: {fail_reason}. Using simulated demo transcript.",
+            "fail_reason": fail_reason,
         }
     return {
         "transcript": transcript_result["transcript"],
-        "language": transcript_result["language"],
+        "language": transcript_result.get("language", "en"),
         "is_demo": False,
         "video_title": metadata.get("video_title", "YouTube video"),
         "video_url": url,
         "video_id": video_id,
         "message": "",
+        "fail_reason": "",
     }
