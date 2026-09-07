@@ -468,7 +468,8 @@ async def start_bg() -> None:
     # --- Register forex feed with market scanner ---
     try:
         from app.services.realtime_feed import forex_feed
-        forex_feed.on_price_update(market_scanner._on_price_update)
+        from app.services.market_scanner import scanner as _scanner
+        forex_feed.on_price_update(_scanner._on_price_update)
         logger.info("Forex feed registered with market scanner")
     except Exception:
         logger.exception("Failed to register forex feed with scanner")
@@ -497,6 +498,41 @@ async def start_bg() -> None:
 
     # Log system status
     logger.info("TradePilot AI started | env=%s | real-time feed + scanner active", ENVIRONMENT)
+
+
+@app.get("/internal/scan")
+async def internal_scan():
+    """Trigger a manual scan cycle. Used by keep-alive cron and for testing.
+
+    This endpoint evaluates all active strategies against the latest prices
+    and generates signals where conditions are met. It's the same logic the
+    real-time feed triggers on every tick, but callable on-demand.
+    """
+    from app.services.market_scanner import scanner as _scanner
+    from app.services.market_data_service import live_quotes
+
+    # Get all unique symbol+timeframe combos from active strategies
+    from app.db.database import SessionLocal
+    from app.db import models
+    db = SessionLocal()
+    try:
+        strategies = (
+            db.query(models.Strategy.asset, models.Strategy.timeframe)
+            .filter(models.Strategy.is_active.is_(True))
+            .distinct()
+            .all()
+        )
+    finally:
+        db.close()
+
+    evaluated = 0
+    for asset, timeframe in strategies:
+        quote = live_quotes.get(asset)
+        if quote:
+            _scanner._on_price_update(asset, timeframe, {}, quote.get("price", 0))
+            evaluated += 1
+
+    return {"message": f"Scan triggered for {evaluated} symbol(s)", "symbols": len(strategies)}
 
 
 @app.get("/")
