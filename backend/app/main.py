@@ -33,6 +33,7 @@ from app.core.config import (
     APP_NAME,
     APP_VERSION,
     CORS_ORIGINS,
+    DATABASE_URL,
     DEBUG,
     ENVIRONMENT,
     JWT_SECRET,
@@ -244,38 +245,31 @@ app.include_router(push.router)
 Base.metadata.create_all(bind=engine)
 
 # Ensure columns added after initial migration exist (safe for both SQLite and PostgreSQL)
-try:
-    with engine.connect() as _conn:
-        _dialect = engine.dialect.name
-        if _dialect == "sqlite":
-            _conn.execute(sql_text(
-                "ALTER TABLE broker_connections ADD COLUMN account_id VARCHAR"
-            ))
-        else:
-            _conn.execute(sql_text(
-                "ALTER TABLE broker_connections ADD COLUMN IF NOT EXISTS account_id VARCHAR"
-            ))
-        _conn.commit()
-except Exception:
-    pass  # Column already exists
+_is_pg = not DATABASE_URL.startswith("sqlite")
 
-# Ensure columns added for kill switch and signal state machine exist
-for _col_sql in [
-    "ALTER TABLE users ADD COLUMN kill_switch BOOLEAN NOT NULL DEFAULT 0",
-    "ALTER TABLE signals ADD COLUMN signal_state VARCHAR NOT NULL DEFAULT 'WATCHING'",
-    "ALTER TABLE signals ADD COLUMN invalidation_reason TEXT",
-    "ALTER TABLE signals ADD COLUMN quality_score FLOAT",
-]:
+_ADD_COLUMNS = [
+    # (table, column, pg_type, sqlite_type)
+    ("broker_connections", "account_id", "VARCHAR", "VARCHAR"),
+    ("users",           "kill_switch",  "BOOLEAN NOT NULL DEFAULT false", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("signals",         "signal_state", "VARCHAR NOT NULL DEFAULT 'WATCHING'", "VARCHAR NOT NULL DEFAULT 'WATCHING'"),
+    ("signals",         "invalidation_reason", "TEXT", "TEXT"),
+    ("signals",         "quality_score", "DOUBLE PRECISION", "FLOAT"),
+]
+
+for _table, _col, _pg_type, _sqlite_type in _ADD_COLUMNS:
+    _type = _pg_type if _is_pg else _sqlite_type
+    _if_not = "IF NOT EXISTS " if _is_pg else ""
+    _sql = f"ALTER TABLE {_table} ADD COLUMN {_if_not}{_col} {_type}"
     try:
         with engine.connect() as _conn:
-            _dialect = engine.dialect.name
-            if _dialect == "sqlite":
-                _conn.execute(sql_text(_col_sql))
-            else:
-                _conn.execute(sql_text(_col_sql.replace("ALTER TABLE", "ALTER TABLE").replace(" ADD COLUMN ", " ADD COLUMN IF NOT EXISTS ")))
+            _conn.execute(sql_text(_sql))
             _conn.commit()
-    except Exception:
-        pass  # Column already exists
+            logger.info("Ensured column %s.%s exists", _table, _col)
+    except Exception as exc:
+        if "already exists" in str(exc).lower() or "duplicate column" in str(exc).lower():
+            logger.debug("Column %s.%s already exists", _table, _col)
+        else:
+            logger.error("Failed to add column %s.%s: %s", _table, _col, exc)
 
 from app.db import seed  # noqa: E402
 

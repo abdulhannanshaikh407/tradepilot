@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Users: add kill_switch column for per-user trading halt
-    op.add_column('users', sa.Column('kill_switch', sa.Boolean(), nullable=False, server_default='0'))
+    op.add_column('users', sa.Column('kill_switch', sa.Boolean(), nullable=False, server_default='false'))
     op.create_index(op.f('ix_users_kill_switch'), 'users', ['kill_switch'], unique=False)
 
     # Signals: add signal state machine columns
