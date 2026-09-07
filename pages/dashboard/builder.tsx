@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactFlow, {
   addEdge,
   Background,
@@ -30,6 +30,7 @@ import {
 import { api } from "lib/api";
 import { useAuth } from "lib/auth";
 import { useRouter } from "next/router";
+import type { Strategy } from "lib/types";
 
 // ---------------------------------------------------------------------------
 // Custom node types
@@ -440,6 +441,167 @@ function BuilderCanvas() {
   const [saving, setSaving] = useState(false);
   const [showPinescript, setShowPinescript] = useState(false);
   const [pinescript, setPinescript] = useState("");
+  const [loadedStrategyId, setLoadedStrategyId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const onUpdateRef = useRef<(nodeId: string, newData: Record<string, unknown>) => void>(() => {});
+
+  // Load existing strategy or seed default nodes for new strategy
+  useEffect(() => {
+    const strategyId = router.query.id ? Number(router.query.id) : null;
+    if (!strategyId || !user) {
+      // New strategy — seed default starter graph: Indicator → Condition → Entry, Risk → Exit
+      if (nodes.length === 0) {
+        const indicatorId = "indicator-default";
+        const conditionId = "condition-default";
+        const entryId = "entry-default";
+        const riskId = "risk-default";
+        const exitId = "exit-default";
+        setNodes([
+          { id: indicatorId, type: "indicator", position: { x: 250, y: 0 }, data: { onUpdate: () => {}, indicator: "RSI", params: { period: 14 } } },
+          { id: conditionId, type: "condition", position: { x: 250, y: 150 }, data: { onUpdate: () => {}, condition: "rsi_cross_above", level: 30 } },
+          { id: entryId, type: "entry", position: { x: 250, y: 300 }, data: { onUpdate: () => {}, type: "entry" } },
+          { id: riskId, type: "risk", position: { x: 100, y: 450 }, data: { onUpdate: () => {}, stopLoss: 2.0, takeProfit: 4.0, risk: 1.0 } },
+          { id: exitId, type: "exit", position: { x: 400, y: 450 }, data: { onUpdate: () => {}, type: "exit" } },
+        ]);
+        setEdges([
+          { id: "e-ind-cond", source: indicatorId, target: conditionId, animated: true, style: { stroke: "#6366f1" } },
+          { id: "e-cond-entry", source: conditionId, target: entryId, animated: true, style: { stroke: "#6366f1" } },
+          { id: "e-risk-exit", source: riskId, target: exitId, animated: true, style: { stroke: "#6366f1" } },
+        ]);
+      }
+      return;
+    }
+
+    setLoading(true);
+    api<Strategy>(`/strategies/${strategyId}`)
+      .then((strategy) => {
+        setLoadedStrategyId(strategy.id);
+        setStrategyName(strategy.name);
+        setAsset(strategy.asset);
+        setTimeframe(strategy.timeframe);
+        setDirection(strategy.direction as "LONG" | "SHORT");
+
+        // Convert saved rules back into nodes/edges
+        const newNodes: Node[] = [];
+        const newEdges: Edge[] = [];
+        let y = 0;
+
+        // Indicators → indicator nodes
+        for (const ind of strategy.indicators || []) {
+          const id = `indicator-${ind.name}-${ind.period || 14}`;
+          newNodes.push({
+            id,
+            type: "indicator",
+            position: { x: 250, y },
+            data: { onUpdate: onUpdateRef.current, indicator: ind.name, params: { period: ind.period || 14, fast: ind.fast, slow: ind.slow, signal: ind.signal } },
+          });
+          y += 150;
+        }
+
+        // Entry rules → condition nodes connected to entry
+        const entryNodeId = "entry-loaded";
+        newNodes.push({
+          id: entryNodeId,
+          type: "entry",
+          position: { x: 250, y },
+          data: { onUpdate: onUpdateRef.current, type: "entry" },
+        });
+        y += 150;
+
+        for (const rule of strategy.entry_rules || []) {
+          const id = `condition-entry-${rule.condition}-${Math.random().toString(36).slice(2, 6)}`;
+          newNodes.push({
+            id,
+            type: "condition",
+            position: { x: 250, y },
+            data: { onUpdate: onUpdateRef.current, condition: rule.condition, level: rule.params?.level || 30 },
+          });
+          newEdges.push({
+            id: `e-${id}-${entryNodeId}`,
+            source: id,
+            target: entryNodeId,
+            animated: true,
+            style: { stroke: "#6366f1" },
+          });
+          y += 150;
+        }
+
+        // Exit rules → condition nodes connected to exit
+        const exitNodeId = "exit-loaded";
+        newNodes.push({
+          id: exitNodeId,
+          type: "exit",
+          position: { x: 400, y },
+          data: { onUpdate: onUpdateRef.current, type: "exit" },
+        });
+        const exitY = y;
+        y += 150;
+
+        for (const rule of strategy.exit_rules || []) {
+          const id = `condition-exit-${rule.condition}-${Math.random().toString(36).slice(2, 6)}`;
+          newNodes.push({
+            id,
+            type: "condition",
+            position: { x: 400, y },
+            data: { onUpdate: onUpdateRef.current, condition: rule.condition, level: rule.params?.level || 70 },
+          });
+          newEdges.push({
+            id: `e-${id}-${exitNodeId}`,
+            source: id,
+            target: exitNodeId,
+            animated: true,
+            style: { stroke: "#6366f1" },
+          });
+          y += 150;
+        }
+
+        // Risk management node
+        const riskNodeId = "risk-loaded";
+        newNodes.push({
+          id: riskNodeId,
+          type: "risk",
+          position: { x: 100, y: exitY },
+          data: {
+            onUpdate: onUpdateRef.current,
+            stopLoss: strategy.stop_loss_value || 2.0,
+            takeProfit: strategy.take_profit_value || 4.0,
+            risk: strategy.risk_per_trade || 1.0,
+          },
+        });
+        newEdges.push({
+          id: `e-risk-${exitNodeId}`,
+          source: riskNodeId,
+          target: exitNodeId,
+          animated: true,
+          style: { stroke: "#6366f1" },
+        });
+
+        // Wire indicators to first conditions if edges aren't already set
+        const indicatorNodes = newNodes.filter((n) => n.type === "indicator");
+        const entryConditionNodes = newNodes.filter((n) => n.type === "condition" && n.id.startsWith("condition-entry-"));
+        for (let i = 0; i < Math.min(indicatorNodes.length, entryConditionNodes.length); i++) {
+          if (!newEdges.find((e) => e.source === indicatorNodes[i].id)) {
+            newEdges.push({
+              id: `e-auto-${indicatorNodes[i].id}-${entryConditionNodes[i].id}`,
+              source: indicatorNodes[i].id,
+              target: entryConditionNodes[i].id,
+              animated: true,
+              style: { stroke: "#6366f1" },
+            });
+          }
+        }
+
+        setNodes(newNodes);
+        setEdges(newEdges);
+      })
+      .catch(() => {
+        // If load fails, seed defaults
+        setNodes([]);
+        setEdges([]);
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.query.id, user]);
 
   const onUpdate = useCallback(
     (nodeId: string, newData: Record<string, unknown>) => {
@@ -452,6 +614,11 @@ function BuilderCanvas() {
     [setNodes]
   );
 
+  // Keep ref in sync so useEffect-seeded nodes get the real callback
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
   const addNode = useCallback(
     (type: string) => {
       const id = `${type}-${Date.now()}`;
@@ -460,7 +627,7 @@ function BuilderCanvas() {
         y: nodes.length * 120 + 50,
       };
 
-      let nodeData: NodeData = { onUpdate };
+      let nodeData: NodeData = { onUpdate: onUpdateRef.current };
       let nodeType = type;
 
       if (type === "indicator") {
@@ -480,7 +647,7 @@ function BuilderCanvas() {
       const newNode: Node = { id, type: nodeType, position, data: nodeData };
       setNodes((nds: Node[]) => [...nds, newNode]);
     },
-    [nodes.length, setNodes, onUpdate]
+    [nodes.length, setNodes]
   );
 
   const onConnect = useCallback(
@@ -539,10 +706,19 @@ function BuilderCanvas() {
     setSaving(true);
     try {
       const config = buildConfig();
-      await api("/strategies", {
-        method: "POST",
-        body: JSON.stringify({ ...config, source: "builder" }),
-      });
+      if (loadedStrategyId) {
+        // Update existing strategy
+        await api(`/strategies/${loadedStrategyId}`, {
+          method: "PUT",
+          body: JSON.stringify({ ...config, source: "builder" }),
+        });
+      } else {
+        // Create new strategy
+        await api("/strategies", {
+          method: "POST",
+          body: JSON.stringify({ ...config, source: "builder" }),
+        });
+      }
       router.push("/dashboard/strategies");
     } catch (err) {
       console.error(err);

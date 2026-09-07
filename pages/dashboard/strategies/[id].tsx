@@ -7,6 +7,7 @@ import {
   ArrowRight,
   BarChart3,
   CheckCircle2,
+  Edit3,
   Radio,
   TrendingUp,
   Trash2,
@@ -134,6 +135,12 @@ export default function StrategyDetail() {
           )}
         </div>
         <div className="flex gap-2">
+          <Link
+            href={`/dashboard/builder?id=${strategy.id}`}
+            className="btn-primary"
+          >
+            <Edit3 className="h-4 w-4" /> Edit in Builder
+          </Link>
           <Button onClick={runBacktest} loading={running}>
             <BarChart3 className="h-4 w-4" /> Run Backtest
           </Button>
