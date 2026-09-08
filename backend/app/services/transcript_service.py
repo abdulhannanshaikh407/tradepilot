@@ -365,10 +365,14 @@ def get_transcript(
         fail_reason = "All transcript sources failed"
         if transcript_error:
             code = getattr(transcript_error, "code", "")
+            msg = getattr(transcript_error, "message", "") or str(transcript_error)
             if code == "no_transcript":
                 fail_reason = "This video has no captions/subtitles available (neither manual nor auto-generated)"
-            else:
-                fail_reason = str(transcript_error.message) if hasattr(transcript_error, "message") else str(transcript_error)
+            elif msg:
+                fail_reason = msg
+            logger.warning("Transcript fetch failed for %s: [%s] %s", video_id, code, msg)
+        else:
+            logger.warning("Transcript fetch returned None for %s with no error", video_id)
         return {
             "transcript": demo["transcript"],
             "language": "simulated",

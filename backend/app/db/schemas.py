@@ -125,6 +125,7 @@ class YouTubeAnalysisResponse(BaseModel):
     video_title: Optional[str] = None
     used_demo_fallback: bool = False
     message: str = ""
+    fail_reason: str = ""
 
 
 # ---------- Signals ----------

@@ -209,8 +209,8 @@ export default function Analyzer() {
 
           {analysis?.used_demo_fallback && (
             <div className="mt-4 rounded-lg border border-warn/30 bg-warn-soft px-4 py-3 text-xs text-amber-200">
-              <strong>Demo mode:</strong> {analysis.message || "A simulated demo transcript was used."}
-              Strategies shown as D E M O are illustrative training data, not real transcript results.
+              <strong>Demo mode:</strong> {analysis.fail_reason || analysis.message || "A simulated demo transcript was used."}
+              {" "}Strategies shown as DEMO are illustrative training data, not real transcript results.
             </div>
           )}
         </div>

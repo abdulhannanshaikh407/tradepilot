@@ -137,6 +137,7 @@ def analyze_youtube(
             if is_demo
             else "Strategy extracted successfully."
         ),
+        fail_reason=transcript_data.get("fail_reason", ""),
     )
 
 

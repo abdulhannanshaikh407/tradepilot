@@ -60,6 +60,7 @@ export interface YouTubeAnalysis {
   video_title?: string | null;
   used_demo_fallback: boolean;
   message: string;
+  fail_reason: string;
 }
 
 export interface Signal {
