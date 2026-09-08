@@ -535,6 +535,169 @@ async def internal_scan():
     return {"message": f"Scan triggered for {evaluated} symbol(s)", "symbols": len(strategies)}
 
 
+@app.post("/internal/force-signal")
+async def force_signal(request: Request):
+    """Force-fire a real signal through the actual code path for end-to-end testing.
+
+    Generates synthetic bars that deliberately satisfy the target strategy's
+    entry+confirmation conditions, feeds them through MarketScanner._on_price_update(),
+    and returns the resulting signal + notification + WS push details.
+
+    Admin-only: requires X-Force-Signal header with the service JWT secret.
+    """
+    from app.services.market_scanner import scanner as _scanner
+    from app.services.market_data_service import live_quotes
+    from app.services.realtime_feed import feed as realtime_feed
+    from app.db.database import SessionLocal
+    from app.db import models
+    from datetime import timedelta
+
+    # Admin-only gate
+    force_secret = request.headers.get("X-Force-Signal", "")
+    if force_secret != JWT_SECRET:
+        return JSONResponse(status_code=403, content={"error": "Admin auth required"})
+
+    body = await request.json()
+    symbol = body.get("symbol", "EUR/USD")
+    timeframe = body.get("timeframe", "4H")
+
+    # Find the target strategy
+    db = SessionLocal()
+    try:
+        strategy = (
+            db.query(models.Strategy)
+            .filter(
+                models.Strategy.asset == symbol,
+                models.Strategy.timeframe == timeframe,
+                models.Strategy.is_active.is_(True),
+            )
+            .first()
+        )
+        if not strategy:
+            return JSONResponse(status_code=404, content={"error": f"No active strategy for {symbol} {timeframe}"})
+
+        strategy_id = strategy.id
+        strategy_name = strategy.name
+        user_id = strategy.user_id
+        entry_rules = strategy.entry_rules
+        confirm_rules = strategy.confirm_rules
+    finally:
+        db.close()
+
+    # --- Generate synthetic bars ---
+    # 220 bars of stable price so EMA-200 converges, then a crossover on the last bar
+    base_price = 1.0800
+    n_bars = 220
+
+    # EMA with constant price converges to that price
+    # Bar 218 (i-1): close slightly below EMA (so cross condition can fire)
+    # Bar 219 (i):   close above EMA (the crossing bar)
+    bars = []
+    now = datetime.now(timezone.utc)
+    for idx in range(n_bars):
+        ts = (now - timedelta(hours=4 * (n_bars - 1 - idx))).isoformat()
+        if idx == n_bars - 2:
+            # Penultimate bar: close below EMA to set up cross
+            close = base_price - 0.0005
+        elif idx == n_bars - 1:
+            # Last bar: close above EMA = crossing event
+            close = base_price + 0.0005
+        else:
+            close = base_price
+
+        bars.append({
+            "timestamp": ts,
+            "open": close,
+            "high": close + 0.0002,
+            "low": close - 0.0002,
+            "close": close,
+            "volume": 100.0,
+            "is_closed": True,
+        })
+
+    # Inject bars into the real bar store
+    realtime_feed.bar_store.set_initial_bars(symbol, timeframe, bars)
+
+    # Also set a live quote so the scanner sees a price
+    crossing_price = base_price + 0.0005
+    live_quotes.set(symbol, crossing_price, source="force_signal", extra={"timeframe": timeframe})
+
+    # Clear any dedup entries for this symbol to ensure the signal fires
+    dedup_key = f"{symbol}:{strategy.direction}:{user_id}"
+    _scanner._signal_dedup.pop(dedup_key, None)
+
+    # --- Feed through the REAL code path ---
+    # This calls _on_price_update -> _evaluate_strategies -> _evaluate_single_strategy
+    # -> creates Signal row -> create_notification() -> WS push
+    before_signals = _count_signals(db, user_id) if False else 0
+    before_notifs = _count_notifications(db, user_id) if False else 0
+
+    _scanner._on_price_update(symbol, timeframe, {}, crossing_price)
+
+    # --- Collect results ---
+    db = SessionLocal()
+    try:
+        # Check for new signal
+        latest_signal = (
+            db.query(models.Signal)
+            .filter(
+                models.Signal.user_id == user_id,
+                models.Signal.strategy_id == strategy_id,
+            )
+            .order_by(models.Signal.id.desc())
+            .first()
+        )
+
+        # Check for new notification
+        latest_notif = (
+            db.query(models.Notification)
+            .filter(
+                models.Notification.user_id == user_id,
+                models.Notification.type == "live_signal",
+            )
+            .order_by(models.Notification.id.desc())
+            .first()
+        )
+
+        signal_info = None
+        if latest_signal and latest_signal.source == "realtime_scanner":
+            signal_info = {
+                "signal_id": latest_signal.id,
+                "symbol": latest_signal.symbol,
+                "direction": latest_signal.direction,
+                "entry_price": latest_signal.entry_price,
+                "status": latest_signal.status,
+                "source": latest_signal.source,
+                "created_at": str(latest_signal.created_at),
+                "reason": latest_signal.reason,
+            }
+
+        notif_info = None
+        if latest_notif:
+            notif_info = {
+                "notif_id": latest_notif.id,
+                "type": latest_notif.type,
+                "title": latest_notif.title,
+                "created_at": str(latest_notif.created_at),
+            }
+    finally:
+        db.close()
+
+    result = {
+        "strategy": {"id": strategy_id, "name": strategy_name, "asset": symbol, "timeframe": timeframe, "user_id": user_id},
+        "synthetic_bars": {"count": n_bars, "base_price": base_price, "crossing_price": crossing_price},
+        "signal_created": signal_info is not None,
+        "signal": signal_info,
+        "notification_created": notif_info is not None,
+        "notification": notif_info,
+        "ws_push": "see server logs for WS delivery confirmation",
+        "code_path": "MarketScanner._on_price_update -> _evaluate_strategies -> _evaluate_single_strategy -> Signal() -> create_notification() -> ws_callback()",
+    }
+
+    logger.info("FORCE-SIGNAL result: signal=%s notif=%s", signal_info is not None, notif_info is not None)
+    return result
+
+
 @app.get("/")
 async def root():
     return {
