@@ -49,8 +49,11 @@ FOREX_SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF
 # Commodity symbols we track (gold, silver)
 COMMODITY_SYMBOLS = ["XAUUSD", "XAGUSD"]
 
+# Index symbols we track (Biquote provides these)
+INDEX_SYMBOLS = ["NAS100", "US500", "US30"]
+
 # All non-crypto symbols that need Biquote polling
-FOREX_COMMODITY_SYMBOLS = FOREX_SYMBOLS + COMMODITY_SYMBOLS
+FOREX_COMMODITY_SYMBOLS = FOREX_SYMBOLS + COMMODITY_SYMBOLS + INDEX_SYMBOLS
 
 # Timeframes to subscribe to
 SUBSCRIBE_TIMEFRAMES = ["15m", "1H", "4H", "1D"]

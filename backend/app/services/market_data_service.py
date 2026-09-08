@@ -108,6 +108,11 @@ TRADINGVIEW_ALIASES = {
     "USDCAD": "USD/CAD",
     "USDCHF": "USD/CHF",
     "NZDUSD": "NZD/USD",
+    "GOLD": "XAUUSD",
+    "SILVER": "XAGUSD",
+    "NAS100": "NAS100",
+    "US500": "US500",
+    "US30": "US30",
 }
 TRADINGVIEW_ALIASES = {k.upper(): v for k, v in TRADINGVIEW_ALIASES.items()}
 

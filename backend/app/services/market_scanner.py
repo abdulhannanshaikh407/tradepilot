@@ -64,7 +64,7 @@ class MarketScanner:
         """Called by RealtimeFeed on every price tick."""
         try:
             # Determine the correct source based on symbol type
-            is_forex_or_gold = "/" in symbol or symbol in ("XAUUSD", "XAGUSD")
+            is_forex_or_gold = "/" in symbol or symbol in ("XAUUSD", "XAGUSD", "NAS100", "US500", "US30")
             source = "biquote" if is_forex_or_gold else "binance_ws"
 
             # Update the live quote store so the rest of the system sees real prices
