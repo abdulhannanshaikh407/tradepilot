@@ -552,10 +552,18 @@ async def force_signal(request: Request):
     from app.db import models
     from datetime import timedelta
 
-    # Admin-only gate
-    force_secret = request.headers.get("X-Force-Signal", "")
-    if force_secret != JWT_SECRET:
-        return JSONResponse(status_code=403, content={"error": "Admin auth required"})
+    # Auth gate: require a valid JWT token (demo user is fine for testing)
+    from app.core.security import decode_access_token
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "Authorization header required"})
+    try:
+        user_id_from_token = decode_access_token(token)
+        if user_id_from_token is None:
+            raise ValueError("invalid token")
+    except Exception:
+        return JSONResponse(status_code=401, content={"error": "Invalid token"})
 
     body = await request.json()
     symbol = body.get("symbol", "EUR/USD")
