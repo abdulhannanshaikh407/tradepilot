@@ -717,10 +717,21 @@ async def force_signal(request: Request):
 async def db_check():
     """Check live database schema: Alembic head, table existence, column verification.
     
-    Non-production only. Returns raw diagnostic data.
+    Requires valid JWT token. Returns raw diagnostic data.
     """
-    if ENVIRONMENT == "production":
-        return JSONResponse(status_code=403, content={"error": "Not available in production"})
+    # Auth gate
+    from app.core.security import decode_access_token
+    from fastapi import Request
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "Authorization header required"})
+    try:
+        user_id = decode_access_token(token)
+        if user_id is None:
+            raise ValueError("invalid")
+    except Exception:
+        return JSONResponse(status_code=401, content={"error": "Invalid token"})
 
     from app.db.database import SessionLocal, engine
     from sqlalchemy import text as sql_text, inspect
