@@ -796,6 +796,76 @@ async def db_check(request: Request):
     return results
 
 
+@app.post("/internal/alembic-stamp")
+async def alembic_stamp(request: Request):
+    """Stamp the Alembic head revision on the live database.
+    
+    This marks the current schema as up-to-date without running migrations.
+    Only needed once to formally adopt Alembic on existing databases.
+    Requires valid JWT token.
+    """
+    from app.core.security import decode_access_token
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
+    if not token:
+        return JSONResponse(status_code=401, content={"error": "Authorization header required"})
+    try:
+        user_id = decode_access_token(token)
+        if user_id is None:
+            raise ValueError("invalid")
+    except Exception:
+        return JSONResponse(status_code=401, content={"error": "Invalid token"})
+
+    from app.db.database import engine
+    from sqlalchemy import text as sql_text
+    from pathlib import Path
+
+    results = {}
+
+    # Get head revision from migration files
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+        cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        script = ScriptDirectory.from_config(cfg)
+        head_rev = script.get_current_head()
+        results["alembic_head"] = head_rev
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to read alembic head: {e}"})
+
+    # Create alembic_version table and stamp it
+    try:
+        with engine.connect() as conn:
+            # Create table if not exists
+            conn.execute(sql_text("""
+                CREATE TABLE IF NOT EXISTS alembic_version (
+                    version_num VARCHAR(32) NOT NULL,
+                    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+                )
+            """))
+            # Delete any existing rows
+            conn.execute(sql_text("DELETE FROM alembic_version"))
+            # Insert head revision
+            conn.execute(sql_text(f"INSERT INTO alembic_version (version_num) VALUES ('{head_rev}')"))
+            conn.commit()
+        results["stamped"] = True
+        results["revision"] = head_rev
+        logger.info("Alembic stamped to revision %s", head_rev)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to stamp: {e}"})
+
+    # Verify
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(sql_text("SELECT version_num FROM alembic_version")).fetchone()
+            results["verified"] = row[0] if row else "NO ROW"
+    except Exception as e:
+        results["verified"] = f"error: {e}"
+
+    return results
+
+
 @app.get("/")
 async def root():
     return {

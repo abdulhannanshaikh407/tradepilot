@@ -243,7 +243,7 @@ class MarketScanner:
 
         create_notification(
             db, strategy.user_id, "live_signal",
-            f"🚨 {strategy.direction} Signal: {strategy.asset}",
+            f"[LIVE] {strategy.direction} Signal: {strategy.asset}",
             notification_msg,
             strategy.user.email if strategy.user else "",
         )
