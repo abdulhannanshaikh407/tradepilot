@@ -552,6 +552,10 @@ async def force_signal(request: Request):
     from app.db import models
     from datetime import datetime, timedelta, timezone
 
+    # Security: only allowed in non-production environments
+    if ENVIRONMENT == "production":
+        return JSONResponse(status_code=403, content={"error": "Not available in production"})
+
     # Auth gate: require a valid JWT token (demo user is fine for testing)
     from app.core.security import decode_access_token
     auth_header = request.headers.get("Authorization", "")
