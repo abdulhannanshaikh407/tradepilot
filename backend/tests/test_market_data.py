@@ -33,7 +33,7 @@ def test_normalize_symbol_aliases():
     assert normalize_symbol("EURUSD") == "EUR/USD"
     assert normalize_symbol("BTC/USD") == "BTC/USD"
     assert normalize_symbol("USDJPY") == "USD/JPY"
-    assert normalize_symbol("GOLD") == "GOLD"  # no alias: left as-is
+    assert normalize_symbol("GOLD") == "XAUUSD"  # alias: GOLD -> XAUUSD
 
 
 def test_tradingview_symbol_roundtrip():
