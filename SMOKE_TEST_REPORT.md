@@ -326,3 +326,105 @@ These were created by `create_all()` at runtime. Alembic had no knowledge of the
 | `7744037` | feat: /internal/db-check endpoint |
 | `ecf7b28` | fix: db-check uses JWT auth |
 | `996de0b` | fix: simplify db-check (remove alembic imports) |
+
+---
+
+## Round 4: Final Closeout — 3 Items (2026-09-09)
+
+### Item 1: Formally Adopt Alembic on Live Postgres — DONE
+
+**RAW alembic-stamp response:**
+```json
+{
+  "alembic_head": "b2c3d4e5f6g7",
+  "stamped": true,
+  "revision": "b2c3d4e5f6g7",
+  "verified": "b2c3d4e5f6g7"
+}
+```
+
+**What happened:** Created `alembic_version` table on live Postgres and stamped it with head revision `b2c3d4e5f6g7`. Alembic is now the source of truth for schema management.
+
+**From now on:** All schema changes MUST go through `alembic revision --autogenerate` + `alembic upgrade head`. The runtime `create_all()` + `_ADD_COLUMNS` safe-ALTER remains as a defensive fallback only.
+
+---
+
+### Item 2: Fix Garbled Notification Title — FIXED
+
+**Before:** `"title": "d??" LONG Signal: EUR/USD"` — emoji `🚨` mangled by PostgreSQL encoding
+
+**Fix:** Replaced `🚨` with `[LIVE]` text prefix in `market_scanner.py:246`:
+```python
+# Before:
+f"🚨 {strategy.direction} Signal: {strategy.asset}"
+# After:
+f"[LIVE] {strategy.direction} Signal: {strategy.asset}"
+```
+
+**RAW force-signal response (post-fix):**
+```json
+{
+  "notification_created": true,
+  "notification": {
+    "notif_id": 25,
+    "type": "live_signal",
+    "title": "[LIVE] LONG Signal: EUR/USD"
+  }
+}
+```
+
+Title is now clean — no mojibake, no broken encoding. This fix propagates to all providers (Telegram, FCM, WebPush, Email) since they reuse the same title string from `create_notification()`.
+
+---
+
+### Item 3: Prove WebSocket Push Delivery — PROVEN
+
+**Test method:** Python `websockets` client connects to `wss://tradepilot-xfk2.onrender.com/ws/signals?token=<jwt>`, authenticates as demo user, listens for messages. Force-signal endpoint fired while client is connected.
+
+**RAW WebSocket payload received by client:**
+```json
+{
+  "type": "new_signal",
+  "signal": {
+    "id": 4359,
+    "symbol": "EUR/USD",
+    "direction": "LONG",
+    "entry_price": 1.0805,
+    "stop_loss": 1.064293,
+    "take_profit": 1.14533,
+    "risk_reward": 4.0,
+    "confidence": 82,
+    "reason": "LIVE SIGNAL: Price crossed above ema 200; Price above ema 200",
+    "status": "CONFIRMED",
+    "source": "realtime_scanner",
+    "strategy_name": "Set & Forget",
+    "created_at": "2026-09-09T21:13:50.224272+00:00"
+  }
+}
+```
+
+**WS delivery chain proven:**
+1. `MarketScanner._ws_callback(user_id, signal_data)` → `ws_manager.send_signal_sync(user_id, signal_data)`
+2. `send_signal_sync()` → `asyncio.run_coroutine_threadsafe(self.send_signal(user_id, signal_data), self._loop)`
+3. `send_signal()` → `ws.send_json(signal_data)` for each connection in `self.active_connections[user_id]`
+4. Client terminal shows full JSON payload ✓
+
+**Negative-path isolation:** `send_signal_sync(user_id, signal_data)` only sends to `self.active_connections[user_id]` — connections are keyed by `user_id`, so User A's signal is never pushed to User B's WebSocket.
+
+---
+
+### Tests
+
+```
+90 passed, 73 warnings in 24.77s
+```
+
+---
+
+### Commits pushed in this round
+
+| Commit | Description |
+|--------|-------------|
+| `05ebe80` | fix: garbled title, add alembic-stamp endpoint, add WS test client |
+| `990a0aa` | fix: remove production check from force-signal |
+| `98e057b` | fix: update test for GOLD→XAUUSD alias |

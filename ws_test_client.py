@@ -36,6 +36,9 @@ async def listen_for_signals(token: str):
         while time.time() - start < TIMEOUT_SECONDS:
             try:
                 msg = await asyncio.wait_for(ws.recv(), timeout=15)
+                # Skip non-JSON messages (server pings)
+                if not msg.startswith("{"):
+                    continue
                 data = json.loads(msg)
                 received_messages.append(data)
                 print(f"\n>>> RECEIVED MESSAGE #{len(received_messages)}:")
