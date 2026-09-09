@@ -550,7 +550,7 @@ async def force_signal(request: Request):
     from app.services.realtime_feed import feed as realtime_feed
     from app.db.database import SessionLocal
     from app.db import models
-    from datetime import timedelta
+    from datetime import datetime, timedelta, timezone
 
     # Auth gate: require a valid JWT token (demo user is fine for testing)
     from app.core.security import decode_access_token
