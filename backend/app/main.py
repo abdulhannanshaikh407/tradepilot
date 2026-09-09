@@ -713,6 +713,89 @@ async def force_signal(request: Request):
     return result
 
 
+@app.get("/internal/db-check")
+async def db_check():
+    """Check live database schema: Alembic head, table existence, column verification.
+    
+    Non-production only. Returns raw diagnostic data.
+    """
+    if ENVIRONMENT == "production":
+        return JSONResponse(status_code=403, content={"error": "Not available in production"})
+
+    from app.db.database import SessionLocal, engine
+    from sqlalchemy import text as sql_text, inspect
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from alembic.runtime.migration import MigrationContext
+
+    results = {}
+
+    # 1. Database type and version
+    with engine.connect() as conn:
+        db_type = conn.dialect.name
+        db_version = conn.dialect.server_version_info
+        results["database"] = {"type": db_type, "version": str(db_version)}
+
+    # 2. Alembic current revision (from DB)
+    with engine.connect() as conn:
+        ctx = MigrationContext.configure(conn)
+        current_rev = ctx.get_current_revision()
+        results["alembic_current"] = current_rev
+
+    # 3. Alembic head revision (from migration files)
+    try:
+        cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+        script = ScriptDirectory.from_config(cfg)
+        head_rev = script.get_current_head()
+        results["alembic_head"] = head_rev
+    except Exception as e:
+        results["alembic_head"] = f"error: {e}"
+
+    # 4. Check all expected tables exist
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    
+    expected_tables = [
+        "users", "strategies", "signals", "trades", "backtests",
+        "webhook_events", "notifications", "usage_records", "system_config",
+        "subscriptions", "transcripts",
+        # The 7 tables from migration b2c3d4e5f6g7
+        "broker_connections", "autotrade_configs", "positions",
+        "alert_preferences", "device_tokens", "real_positions", "real_trades",
+    ]
+    
+    table_status = {}
+    for t in expected_tables:
+        table_status[t] = "EXISTS" if t in existing_tables else "MISSING"
+    
+    results["tables"] = table_status
+    results["extra_tables"] = sorted(existing_tables - set(expected_tables))
+
+    # 5. Check columns for the 7 migration tables
+    critical_columns = {
+        "broker_connections": ["id", "user_id", "broker_name", "api_key_encrypted", "api_secret_encrypted", "account_type", "account_id", "is_verified"],
+        "autotrade_configs": ["id", "user_id", "strategy_id", "enabled", "mode", "capital", "risk_percent"],
+        "positions": ["id", "user_id", "symbol", "direction", "status", "entry_price"],
+        "alert_preferences": ["id", "user_id", "strategy_id", "alerts_enabled", "push_enabled"],
+        "device_tokens": ["id", "user_id", "token", "platform", "is_active"],
+        "real_positions": ["id", "user_id", "broker_connection_id", "symbol", "quantity", "entry_price"],
+        "real_trades": ["id", "user_id", "broker_connection_id", "symbol", "side", "quantity", "entry_price", "status"],
+    }
+    
+    col_status = {}
+    for table, expected_cols in critical_columns.items():
+        if table in existing_tables:
+            actual_cols = {c["name"] for c in inspector.get_columns(table)}
+            missing = [c for c in expected_cols if c not in actual_cols]
+            col_status[table] = {"missing_columns": missing, "ok": len(missing) == 0}
+        else:
+            col_status[table] = {"missing_columns": expected_cols, "ok": False}
+    
+    results["column_checks"] = col_status
+
+    return results
+
+
 @app.get("/")
 async def root():
     return {
