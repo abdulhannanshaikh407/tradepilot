@@ -714,14 +714,13 @@ async def force_signal(request: Request):
 
 
 @app.get("/internal/db-check")
-async def db_check():
-    """Check live database schema: Alembic head, table existence, column verification.
+async def db_check(request: Request):
+    """Check live database schema: table existence, column verification.
     
     Requires valid JWT token. Returns raw diagnostic data.
     """
     # Auth gate
     from app.core.security import decode_access_token
-    from fastapi import Request
     auth_header = request.headers.get("Authorization", "")
     token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else ""
     if not token:
@@ -733,44 +732,23 @@ async def db_check():
     except Exception:
         return JSONResponse(status_code=401, content={"error": "Invalid token"})
 
-    from app.db.database import SessionLocal, engine
-    from sqlalchemy import text as sql_text, inspect
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-    from alembic.runtime.migration import MigrationContext
+    from app.db.database import engine
+    from sqlalchemy import inspect as sa_inspect
 
     results = {}
 
-    # 1. Database type and version
+    # 1. Database type
     with engine.connect() as conn:
-        db_type = conn.dialect.name
-        db_version = conn.dialect.server_version_info
-        results["database"] = {"type": db_type, "version": str(db_version)}
+        results["database"] = {"type": conn.dialect.name}
 
-    # 2. Alembic current revision (from DB)
-    with engine.connect() as conn:
-        ctx = MigrationContext.configure(conn)
-        current_rev = ctx.get_current_revision()
-        results["alembic_current"] = current_rev
-
-    # 3. Alembic head revision (from migration files)
-    try:
-        cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
-        script = ScriptDirectory.from_config(cfg)
-        head_rev = script.get_current_head()
-        results["alembic_head"] = head_rev
-    except Exception as e:
-        results["alembic_head"] = f"error: {e}"
-
-    # 4. Check all expected tables exist
-    inspector = inspect(engine)
+    # 2. Check all expected tables exist
+    inspector = sa_inspect(engine)
     existing_tables = set(inspector.get_table_names())
     
     expected_tables = [
         "users", "strategies", "signals", "trades", "backtests",
         "webhook_events", "notifications", "usage_records", "system_config",
         "subscriptions", "transcripts",
-        # The 7 tables from migration b2c3d4e5f6g7
         "broker_connections", "autotrade_configs", "positions",
         "alert_preferences", "device_tokens", "real_positions", "real_trades",
     ]
@@ -782,7 +760,7 @@ async def db_check():
     results["tables"] = table_status
     results["extra_tables"] = sorted(existing_tables - set(expected_tables))
 
-    # 5. Check columns for the 7 migration tables
+    # 3. Check columns for the 7 migration tables
     critical_columns = {
         "broker_connections": ["id", "user_id", "broker_name", "api_key_encrypted", "api_secret_encrypted", "account_type", "account_id", "is_verified"],
         "autotrade_configs": ["id", "user_id", "strategy_id", "enabled", "mode", "capital", "risk_percent"],
@@ -803,6 +781,17 @@ async def db_check():
             col_status[table] = {"missing_columns": expected_cols, "ok": False}
     
     results["column_checks"] = col_status
+
+    # 4. Alembic revision from alembic_version table
+    try:
+        from sqlalchemy import text as sql_text
+        with engine.connect() as conn:
+            row = conn.execute(sql_text("SELECT version_num FROM alembic_version")).fetchone()
+            results["alembic_version_in_db"] = row[0] if row else "NO ROW"
+    except Exception as e:
+        results["alembic_version_in_db"] = f"error: {e}"
+
+    return results
 
     return results
 
