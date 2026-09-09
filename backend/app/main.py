@@ -588,7 +588,7 @@ async def force_signal(request: Request):
         strategy_name = strategy.name
         user_id = strategy.user_id
         entry_rules = strategy.entry_rules
-        confirm_rules = strategy.confirm_rules
+        confirm_rules = strategy.confirmation_rules
     finally:
         db.close()
 
@@ -637,10 +637,13 @@ async def force_signal(request: Request):
     # --- Feed through the REAL code path ---
     # This calls _on_price_update -> _evaluate_strategies -> _evaluate_single_strategy
     # -> creates Signal row -> create_notification() -> WS push
-    before_signals = _count_signals(db, user_id) if False else 0
-    before_notifs = _count_notifications(db, user_id) if False else 0
-
-    _scanner._on_price_update(symbol, timeframe, {}, crossing_price)
+    try:
+        logger.info("FORCE-SIGNAL: calling _on_price_update(%s, %s, price=%s)", symbol, timeframe, crossing_price)
+        _scanner._on_price_update(symbol, timeframe, {}, crossing_price)
+        logger.info("FORCE-SIGNAL: _on_price_update completed")
+    except Exception as exc:
+        logger.exception("FORCE-SIGNAL: _on_price_update failed: %s", exc)
+        return JSONResponse(status_code=500, content={"error": f"Scanner failed: {exc}"})
 
     # --- Collect results ---
     db = SessionLocal()
