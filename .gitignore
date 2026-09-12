@@ -51,3 +51,5 @@ htmlcov/
 signals.json
 .vercel
 .env*
+test_*.py
+ws_*test*.py
